@@ -321,20 +321,24 @@ demonstrate a real code change on main, a new artifact and revalidation.
 ### TEST preparation, local draft
 
 Merging to main automatically builds and deploys DEV. Manually run Release from
-main after that commit's DEV pipeline succeeds. No PROD jobs are included.
+main after the selected commit's DEV pipeline succeeds. No PROD jobs are included.
 
-1. Select `tag-mode: rc` (default) or `stable`. RC mode also takes `rc-number`,
+1. Select `operation: prepare`. Set `source-ref` to a main commit SHA, tag,
+   or pointer such as `main~1`.
+   Blank selects the workflow dispatch commit. The pointer is resolved once to
+   a full SHA, which must be an ancestor of the dispatch commit on main.
+   Select `tag-mode: rc` (default) or `stable`. RC mode also takes `rc-number`,
    a positive integer starting at 1. QA behavior comes from the TEST environment.
 2. The workflow requires a successful main build and DEV deployment for the
-   dispatch commit. It fails immediately if DEV has not passed; it does not poll.
+   selected source commit. It fails immediately if DEV has not passed; it does not poll.
 3. Release Please opens or updates the draft version/changelog PR and calculates
    the next version from Conventional Commits, starting from baseline 1.2.3.
 4. The workflow reads that proposed version from the draft manifest and creates
-   a real tag on the already DEV-verified dispatch commit. For example, a proposed
+   a real tag on the selected DEV-verified source commit. For example, a proposed
    1.3.0 becomes `v1.3.0-rc.1` in RC mode or `v1.3.0` in stable mode. It publishes
    a GitHub prerelease for RC, or a regular release for stable. Neither is marked
-   latest by this TEST workflow. If main advanced during preparation, the run
-   stops before tagging; prepare again after the new DEV deployment passes.
+   latest by this TEST workflow. Later changes to main do not alter the selected
+   source SHA.
 5. TEST rebuilds the tagged source and deploys it on port 3002. The workflow
    directly calls Build/Deploy because tags created by GITHUB_TOKEN do not trigger
    another workflow automatically. Runtime release identity shows the real tag.
@@ -344,17 +348,47 @@ main after that commit's DEV pipeline succeeds. No PROD jobs are included.
    run records the tag, commit and verified configuration. This is automated QA
    evidence; human sign-off and PROD promotion remain deferred.
 
-Release Please owns version calculation and the metadata PR. The small tag step
+Release Please owns version calculation and the metadata PR on current main.
+For historical selections, that draft can include later commits and is not the
+selected release's change evidence. GitHub release notes use the selected tag. The small tag step
 owns publication on the existing DEV commit, allowing TEST before a metadata PR
 merge. This differs from Release Please's native publication after PR merge.
 Package version remains the selected commit's version; release identity shows
 the new tag. The draft metadata PR stays unmerged during this milestone.
+Build and QA check out the selected source. Deployment tooling comes from the
+trusted dispatch commit, so older app commits need not contain the latest
+Compose filename. Historical app versions must still support the QA contract.
 
 Existing tags are reused only when they directly reference the same source SHA.
 A tag on another commit fails preparation and is never moved. To test another
 commit, use a new RC number or a new stable version. QA failure leaves the release
 published but unverified. Fix code through main or rerun the same commit with
 normal QA behavior. A regular GitHub release alone does not imply QA approval.
+
+### TEST rollback
+
+Run Release from main with `operation: rollback` and set `source-ref` to an
+existing published version tag, for example `v1.3.0` or `v1.3.0-rc.1`.
+Rollback rejects a blank source, a raw SHA, a branch pointer, an unknown tag or
+a draft release. `tag-mode` and `rc-number` are ignored during rollback.
+
+The tag must resolve to a commit in main history with a successful DEV pipeline.
+Release Please, version calculation, draft PR updates and tag/release publication
+are skipped. The existing tag and resolved commit go directly through the same
+TEST build, deployment and live QA jobs. No tag is moved and DEV is unaffected.
+
+This is source rollback: the image is rebuilt from the old commit. It does not
+restore an identical earlier image, flag settings, persisted data or dependencies
+outside the build lockfile. The current TEST environment's `QA_DEMO` value and
+saved flags still apply; rollback never changes them to force a passing result.
+A failed QA run leaves the selected deployment in TEST and records the failure;
+there is no automatic recovery deployment. The selected release is not assumed
+QA-approved just because it has a published tag. Rollback runs fresh QA.
+
+PROD rollback is not implemented. Future PROD delivery and recovery must accept
+stable version tags only, never RC tags.
+
+### Setup
 
 Before running on GitHub:
 

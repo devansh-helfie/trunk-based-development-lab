@@ -56,10 +56,10 @@ jobs:
             *) echo 'Set the TEST environment variable QA_DEMO to pass or fail.'; exit 1 ;;
           esac
 
-      - name: Check out deployment configuration
+      - name: Check out trusted deployment configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source-sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Use Docker Desktop and local environment settings
