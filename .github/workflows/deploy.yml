@@ -47,7 +47,7 @@ jobs:
         run: |
           umask 077
           mkdir -p "$DOCKER_CONFIG"
-          printf '{"credHelpers":{"ghcr.io":""}}\n' > "$DOCKER_CONFIG/config.json"
+          printf '{"credHelpers":{"ghcr.io":""},"cliPluginsExtraDirs":["/Applications/Docker.app/Contents/Resources/cli-plugins"]}\n' > "$DOCKER_CONFIG/config.json"
 
       - name: Sign in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
