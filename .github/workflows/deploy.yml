@@ -43,6 +43,12 @@ jobs:
           echo "DOCKER_CONFIG=$RUNNER_TEMP/trunk-lab-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
           echo "DEV_ENV_FILE=$HOME/.local/share/trunk-based-development-lab/environments/dev/.env" >> "$GITHUB_ENV"
 
+      - name: Use private file-based credentials instead of macOS Keychain
+        run: |
+          umask 077
+          mkdir -p "$DOCKER_CONFIG"
+          printf '{"credHelpers":{"ghcr.io":""}}\n' > "$DOCKER_CONFIG/config.json"
+
       - name: Sign in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:

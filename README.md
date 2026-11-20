@@ -31,7 +31,9 @@ curl -H 'Content-Type: application/json' \
   -d '{"quantity":5}' http://127.0.0.1:3000/api/quote
 ```
 
-`npm start` binds to localhost by default. Stop it with Ctrl+C.
+`npm start` binds to localhost by default. Open `http://127.0.0.1:3000/` for
+the basic Release Lab page, with running version details and links to health,
+version JSON and the protected feature-flag panel. Stop it with Ctrl+C.
 
 ## Run the local container
 
@@ -284,8 +286,10 @@ checks out deployment configuration, connects to Docker Desktop, signs in to
 GHCR, deploys with Compose and checks the running version. Setup scripts handle
 local prerequisites. Failed startup or version checks fail the workflow;
 automatic rollback and deployment snapshots are deferred for this POC.
-The local Docker login configuration remains separate from the user's normal
-registry credentials.
+The runner creates a private temporary Docker configuration with a file-based
+GHCR credential entry. This avoids the locked macOS Keychain in a headless runner
+and leaves the user's normal registry credentials unchanged. The login action
+removes its credentials at job end.
 
 The deferred commit-to-artifact draft is preserved under the ignored `.backups/`
 folder, including a restore script and Git state. It was not live-verified and
