@@ -3,6 +3,15 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Prepare a new TEST candidate, or roll back TEST to an existing release tag
+        type: choice
+        options: [prepare, rollback]
+        default: prepare
+      source-ref:
+        description: Prepare accepts a SHA, tag or main~1 (blank uses main); rollback requires an existing release tag
+        type: string
+        default: ''
       tag-mode:
         description: Tag format for TEST
         type: choice
@@ -30,24 +39,61 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       actions: read
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tag: ${{ steps.source.outputs.tag }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Check out main history to resolve the selected commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a published version tag for rollback
+        if: inputs.operation == 'rollback'
+        env:
+          RELEASE_TAG: ${{ inputs.source-ref }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Rollback requires an existing tag such as v1.3.0 or v1.3.0-rc.1.'; exit 1; }
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft == false' | grep -qx true
+
+      - name: Resolve the pointer and require it to belong to main
+        id: source
+        env:
+          SOURCE_REF: ${{ inputs.source-ref || github.sha }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          # Anchor main-relative pointers to the main commit selected by this run.
+          git branch --force main "$GITHUB_SHA"
+          if [[ "$OPERATION" == 'rollback' ]]; then
+            echo "tag=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+            SOURCE_REF="refs/tags/$SOURCE_REF"
+          fi
+          sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
+          git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo 'Select a commit from main history.'; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Validate the RC sequence
-        if: inputs.tag-mode == 'rc'
+        if: inputs.operation == 'prepare' && inputs.tag-mode == 'rc'
         env:
           RC_NUMBER: ${{ inputs.rc-number }}
         run: '[[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]]'
 
       - name: Check the main build and DEV deployment result
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
-            -f head_sha="$GITHUB_SHA" -f event=push -f status=success -f per_page=1 \
+            -f head_sha="$SOURCE_SHA" -f event=push -f status=success -f per_page=1 \
             --jq '.total_count > 0' | grep -qx true
 
   release:
-    name: Prepare and tag the TEST release
+    name: Select the TEST release
     needs: verify-dev
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -56,11 +102,14 @@ jobs:
       pull-requests: write
       issues: write
     outputs:
-      tag: ${{ steps.tag.outputs.name }}
+      tag: ${{ steps.tag.outputs.name || needs.verify-dev.outputs.tag }}
+      sha: ${{ needs.verify-dev.outputs.sha }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SOURCE_SHA: ${{ needs.verify-dev.outputs.sha }}
     steps:
       - name: Calculate the version with Release Please
+        if: inputs.operation == 'prepare'
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
@@ -70,6 +119,7 @@ jobs:
           skip-github-release: true
 
       - name: Read the proposed version and select the TEST tag
+        if: inputs.operation == 'prepare'
         id: tag
         env:
           RELEASE_BRANCH: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || 'release-please--branches--main' }}
@@ -85,26 +135,23 @@ jobs:
           fi
           echo "name=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Require main to remain on the selected DEV commit
-        run: |
-          current_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')
-          [[ "$current_sha" == "$GITHUB_SHA" ]] || { echo 'Main advanced. Prepare again after its DEV deployment passes.'; exit 1; }
-
       - name: Create the tag or reuse it on the same commit
+        if: inputs.operation == 'prepare'
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
         run: |
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > tag.json 2> tag-error.log; then
-            jq -e --arg sha "$GITHUB_SHA" '.object.type == "commit" and .object.sha == $sha' tag.json
+            jq -e --arg sha "$SOURCE_SHA" '.object.type == "commit" and .object.sha == $sha' tag.json
           elif grep -q 'HTTP 404' tag-error.log; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA"
+              -f ref="refs/tags/$RELEASE_TAG" -f sha="$SOURCE_SHA"
           else
             cat tag-error.log >&2
             exit 1
           fi
 
       - name: Publish the TEST release
+        if: inputs.operation == 'prepare'
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
           TAG_MODE: ${{ inputs.tag-mode }}
@@ -116,6 +163,13 @@ jobs:
               --title "$RELEASE_TAG" --generate-notes --latest=false --prerelease="$([[ "$TAG_MODE" == 'rc' ]] && echo true || echo false)"
           fi
 
+      - name: Reuse the rollback tag without changing release metadata
+        if: inputs.operation == 'rollback'
+        env:
+          RELEASE_TAG: ${{ needs.verify-dev.outputs.tag }}
+        run: |
+          echo "Rollback selected $RELEASE_TAG at $SOURCE_SHA. Release Please and publication are skipped." >> "$GITHUB_STEP_SUMMARY"
+
   test:
     name: Build and deploy TEST
     needs: release
@@ -126,7 +180,7 @@ jobs:
       attestations: write
     uses: ./.github/workflows/build.yml
     with:
-      source-ref: ${{ github.sha }}
+      source-ref: ${{ needs.release.outputs.sha }}
       environment: TEST
       release-tag: ${{ needs.release.outputs.tag }}
 
@@ -140,13 +194,13 @@ jobs:
     env:
       BASE_URL: http://127.0.0.1:3002
       QA_EXPECT_BULK_DISCOUNT: 'true'
-      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_SHA: ${{ needs.release.outputs.sha }}
       RELEASE_TAG: ${{ needs.release.outputs.tag }}
     steps:
       - name: Check out the release QA checks
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.release.outputs.sha }}
           persist-credentials: false
 
       - name: Use Node.js 24
@@ -172,6 +226,7 @@ jobs:
       - name: Summarize the TEST result
         env:
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OPERATION: ${{ inputs.operation }}
         run: |
-          echo "TEST QA passed for $RELEASE_SHA ($RELEASE_TAG)." >> "$GITHUB_STEP_SUMMARY"
+          echo "TEST $OPERATION QA passed for $RELEASE_SHA ($RELEASE_TAG)." >> "$GITHUB_STEP_SUMMARY"
           echo "Evidence: $GH_RUN_URL. No PROD deployment was created." >> "$GITHUB_STEP_SUMMARY"
