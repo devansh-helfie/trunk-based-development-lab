@@ -320,102 +320,83 @@ The fault switch is local teaching scaffolding. Turning it off is not a source
 fix, a QA approval or permission to deploy. The later QA-fix milestone will
 demonstrate a real code change on main, a new artifact and revalidation.
 
-### TEST preparation, local draft
+### Release preparation and TEST
 
-Merging to main automatically builds and deploys DEV. Manually run Release from
-main after the selected commit's DEV pipeline succeeds. No PROD jobs are included.
+Use Actions > Release > Run workflow from branch main. There are three operations:
 
-1. Select `operation: prepare`. Set `source-ref` to a main commit SHA, tag,
-   or pointer such as `main~1`.
-   Blank selects the workflow dispatch commit. The pointer is resolved once to
-   a full SHA, which must be an ancestor of the dispatch commit on main.
-   Select `tag-mode: rc` (default) or `stable`. RC mode also takes `rc-number`,
-   a positive integer starting at 1. QA behavior comes from the TEST environment.
-2. The workflow requires a successful main build and DEV deployment for the
-   selected source commit. It fails immediately if DEV has not passed; it does not poll.
-3. Release Please opens or updates the draft version/changelog PR and calculates
-   the next version from Conventional Commits, starting from baseline 1.2.3.
-4. The workflow reads that proposed version from the draft manifest and creates
-   a real tag on the selected DEV-verified source commit. For example, a proposed
-   1.3.0 becomes `v1.3.0-rc.1` in RC mode or `v1.3.0` in stable mode. It publishes
-   a GitHub prerelease for RC, or a regular release for stable. Neither is marked
-   latest by this TEST workflow. Later changes to main do not alter the selected
-   source SHA.
-5. TEST rebuilds the tagged source and deploys it on port 3002. The workflow
-   directly calls Build/Deploy because tags created by GITHUB_TOKEN do not trigger
-   another workflow automatically. Runtime release identity shows the real tag.
-6. QA checks live TEST pricing and configuration. The TEST environment variable
-   `QA_DEMO=fail` injects the discount
-   boundary defect and causes a failed run. `QA_DEMO=pass` checks normal behavior. The
-   run records the tag, commit and verified configuration. This is automated QA
-   evidence; human sign-off and PROD promotion remain deferred.
+1. `prepare` only creates or updates the Release Please draft version/changelog
+   PR. It publishes no tags and deploys no environment. Mark the draft ready as a
+   user so normal PR checks run, review it, then merge with squash.
+2. Merging that PR updates package.json, the lockfile, release manifest and
+   changelog. Its exact merge commit automatically builds and deploys DEV.
+3. After that DEV run succeeds, select `operation: test` and enter the merged
+   `release-pr` number. Blank `source-ref` selects that PR's merge SHA. An optional
+   SHA, tag or main-relative pointer must resolve to exactly the same commit.
+4. Select `tag-mode: rc` with a positive `rc-number`, or `stable`. The workflow
+   validates the release PR targets main, came from a Release Please branch,
+   is merged, and has matching package/manifest versions and PR version title.
+   It also requires that exact commit to belong to main and have a successful
+   Build/DEV pipeline. It never takes the version from an unmerged draft.
+5. The tag is created on that verified metadata commit. Version 2.0.0 becomes
+   `v2.0.0-rc.1` or `v2.0.0`. A tag on the same commit is reusable; a tag on a
+   different commit fails with an explicit error and is never moved.
+6. Build and Deploy run directly for TEST, then QA checks live pricing, flags,
+   commit, release identity and package version. Token-created tag events do not
+   trigger another workflow automatically. PROD is not deployed.
 
-Release Please owns version calculation and the metadata PR on current main.
-For historical selections, that draft can include later commits and is not the
-selected release's change evidence. GitHub release notes use the selected tag. The small tag step
-owns publication on the existing DEV commit, allowing TEST before a metadata PR
-merge. This differs from Release Please's native publication after PR merge.
-Package version remains the selected commit's version; release identity shows
-the new tag. The draft metadata PR stays unmerged during this milestone.
-Build and QA check out the selected source. Deployment tooling comes from the
-trusted dispatch commit, so older app commits need not contain the latest
-Compose filename. Historical app versions must still support the QA contract.
+Release Please owns version calculation and the metadata PR. Named workflow
+steps publish the selected RC or stable tag after the metadata merge and DEV
+verification. Stable publication marks that PR `autorelease: tagged`, preserving
+other labels, so the next prepare can advance the release lifecycle. RC-only
+publication leaves it pending until its stable tag is published. Neither mode
+marks a TEST release latest. Published tags alone do not mean QA approved.
 
-Existing tags are reused only when they directly reference the same source SHA.
-A tag on another commit fails preparation and is never moved. To test another
-commit, use a new RC number or a new stable version. QA failure leaves the release
-published but unverified. Fix code through main or rerun the same commit with
-normal QA behavior. A regular GitHub release alone does not imply QA approval.
+Application PRs are separate from the version PR: multiple application PRs can
+be grouped into one release. PR policy only runs on pull-request events. Main
+pushes and manually dispatched release runs still run application tests, but
+skip PR title/body validation because they do not represent a PR event.
 
 ### TEST rollback
 
-Run Release from main with `operation: rollback` and set `source-ref` to an
-existing published version tag, for example `v1.3.0` or `v1.3.0-rc.1`.
-Rollback rejects a blank source, a raw SHA, a branch pointer, an unknown tag or
-a draft release. `tag-mode` and `rc-number` are ignored during rollback.
+Select `operation: rollback` and provide an existing published version tag in
+`source-ref`, such as `v1.3.0-rc.1`. Raw SHAs, branch pointers, blank inputs,
+unknown tags and draft releases are rejected for rollback. `release-pr`,
+`tag-mode` and `rc-number` are ignored. The tag must resolve to main history
+and have a successful DEV pipeline. Existing tags and releases stay unchanged.
 
-The tag must resolve to a commit in main history with a successful DEV pipeline.
-Release Please, version calculation, draft PR updates and tag/release publication
-are skipped. The existing tag and resolved commit go directly through the same
-TEST build, deployment and live QA jobs. No tag is moved and DEV is unaffected.
+Rollback bypasses Release Please and publication, rebuilds the selected source,
+deploys TEST and runs fresh QA. It restores neither the identical earlier image
+nor persisted data or flag settings. The current TEST `QA_DEMO` and saved flags
+still apply. Failed QA leaves the selected deployment in TEST; there is no
+automatic recovery deployment. Legacy tags created before metadata-first
+releasing may have a different package version, so rollback verifies the source
+and tag identity without inventing a matching package version.
 
-This is source rollback: the image is rebuilt from the old commit. It does not
-restore an identical earlier image, flag settings, persisted data or dependencies
-outside the build lockfile. The current TEST environment's `QA_DEMO` value and
-saved flags still apply; rollback never changes them to force a passing result.
-A failed QA run leaves the selected deployment in TEST and records the failure;
-there is no automatic recovery deployment. The selected release is not assumed
-QA-approved just because it has a published tag. Rollback runs fresh QA.
+Deployment configuration comes from the trusted dispatch commit; Build and QA
+use the selected application source. Older applications must support the QA
+contract. Historical new release candidates require their merged version PR;
+use rollback to restore an already published application version.
 
-PROD rollback is not implemented. Future PROD delivery and recovery must accept
-stable version tags only, never RC tags.
+### Setup and current limits
 
-### Setup
-
-Before running on GitHub:
-
-- Publish these workflow changes through a PR and let their main DEV run pass.
 - Allow GitHub Actions to create PRs in the repository's Actions settings.
-- In Settings > Environments > TEST > Environment variables, set `QA_DEMO` to
-  `pass` or `fail`. Missing defaults to pass; any other value fails deployment.
-  The setting is read on deployment, so changing it requires rerunning TEST
-  preparation. DEV and PROD always keep fault injection off. QA assertions
-  remain unchanged and report the real app result.
-- Run `bash scripts/setup-env.sh TEST` on the personal Mac. DEV and TEST use
-  separate protected settings, flag volumes and ports. New TEST settings seed
-  bulkDiscount on. Configure any existing TEST flag explicitly if it differs;
-  QA never changes its expectation to match the app.
+- Run `bash scripts/setup-env.sh TEST` on the personal Mac. Each environment
+  has separate private settings, flag volume and port. New TEST settings seed
+  bulkDiscount on. Configure existing TEST flags explicitly if needed.
+- Set `QA_DEMO=pass` or `fail` under Settings > Environments > TEST > Variables.
+  Missing defaults to pass; other values fail deployment. Changing it requires
+  redeployment. QA expectations never change to match the app's answer.
+- DEV remains automatic on main and keeps fault injection off. Standard main
+  builds retain attestation; manual TEST rebuilds and artifact reuse are deferred.
 
-Rebuilding is deliberate for this POC; identical artifact promotion is deferred.
-Main builds retain the standard attestation action. Manual TEST builds do not
-attest. No Release workflow has run and TEST has not been deployed by this draft.
+PROD promotion and rollback are not implemented. Future PROD delivery must use
+stable version tags only and require QA approval for the exact TEST-verified
+commit. Rebuilding remains deliberate for this POC.
 
 ## Future promotion milestones
 
 Human QA sign-off, RC-to-stable promotion on the same verified commit, PROD
 promotion, ZIP deployment and same-digest artifact reuse remain future work.
-Before integrating the metadata PR with publication, reconcile its new commit
-and version baseline so earlier QA is never used to approve a different SHA.
 Earlier designs are retained in `.backups/`.
 
 ## Learning log
