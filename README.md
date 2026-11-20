@@ -304,10 +304,11 @@ CI/QA passed or a workflow is trustworthy; reviewed workflow changes and branch
 protection remain necessary. Long-term release evidence retention is later work.
 This milestone does not deploy DEV, create release tags or grant TEST/QA approval.
 
-`npm test` exercises the workflow reuse steps with local GitHub CLI fixtures:
-first publication, earlier successes, original build identity, missing/invalid
-evidence, provenance mismatch and API failures.
-These are local fixture checks, not proof of GHCR publication or live attestation.
+Workflow validation uses local actionlint and reviewed GitHub Actions runs.
+The custom workflow-reuse test harness was removed to keep this POC focused on
+Git and release workflows. Application tests and PR-policy tests remain in CI.
+Actual publication, successful reuse and failed-verification behavior still need
+to be demonstrated on GitHub; local lint does not prove those outcomes.
 
 ## Release metadata and evidence
 
