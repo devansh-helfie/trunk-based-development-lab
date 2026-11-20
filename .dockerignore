@@ -1,0 +1,9 @@
+# Only application source and locked dependencies enter the build context.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!src/
+!src/**
+!public/
+!public/**

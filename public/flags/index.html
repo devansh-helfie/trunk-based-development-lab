@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Release Lab | Feature flags</title>
+  <link rel="stylesheet" href="/flags/panel.css">
+  <script src="/flags/panel.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <div><p class="eyebrow">RELEASE LAB</p><h1>Feature flags</h1><p class="intro">Small switches. Visible changes. Safer releases.</p></div>
+    </header>
+    <section class="build-strip" aria-label="Running application identity">
+      <div><span class="build-label">Environment</span><strong class="pill" id="environment">Loading</strong></div>
+      <div><span class="build-label">App version</span><strong id="version">Loading</strong></div>
+      <div><span class="build-label">Release / RC</span><strong id="release-identity">Loading</strong></div>
+      <div><span class="build-label">Commit SHA</span><strong id="commit-sha">Loading</strong></div>
+    </section>
+    <div class="notice">Changes apply immediately to this environment. Revalidate TEST after every configuration change.</div>
+    <p id="status" role="status" aria-live="polite"></p>
+    <div class="workspace">
+      <section class="card flag-card" aria-labelledby="flags-heading">
+        <div class="section-heading"><div><h2 id="flags-heading">Environment switches</h2><p id="revision">Loading saved configuration...</p></div><button id="refresh" class="secondary" type="button">Refresh</button></div>
+        <div id="flag-list" aria-live="polite"></div>
+        <form id="add-flag">
+          <h3>Add a flag</h3>
+          <label for="flag-name">Flag name</label>
+          <div class="add-row"><input id="flag-name" name="flagName" placeholder="e.g. expressCheckout" pattern="[a-z][a-zA-Z0-9]{0,47}" maxlength="48" autocomplete="off" required><button type="submit">Add flag</button></div>
+          <p class="hint">New flags start off. Connect a flag to application code to give it behavior.</p>
+        </form>
+      </section>
+      <aside>
+        <section class="card" aria-labelledby="quote-heading">
+          <p class="eyebrow">TRY THE FEATURE</p><h2 id="quote-heading">Order quote</h2>
+          <p>Each item costs $10. With <code>bulkDiscount</code> on, 5 or more items get 10% off.</p>
+          <form id="quote-form"><label for="quantity">Quantity</label><div class="add-row"><input id="quantity" type="number" min="1" max="100" step="1" value="5" required><button type="submit">Calculate</button></div></form>
+          <div id="quote-result" class="quote-result" aria-live="polite">Calculate a quote to see the active flag in action.</div>
+          <p class="hint" id="fault-mode"></p>
+        </section>
+        <section class="card evidence" aria-labelledby="snapshot-heading">
+          <h2 id="snapshot-heading">Configuration snapshot</h2>
+          <dl class="artifact-details"><dt>Build run</dt><dd id="build-run">Not recorded</dd><dt>Image digest</dt><dd id="image-digest">Not recorded</dd></dl>
+          <p id="updated"></p><code id="configuration-id"></code>
+          <p class="hint">This identifies the current settings. It is not QA sign-off or permission to promote a release.</p>
+          <p class="hint">Release and build metadata are runtime declarations. GitHub verification will be added with the deployment gates.</p>
+        </section>
+      </aside>
+    </div>
+    <footer>Personal demo environment. Changes are saved locally. Removing a flag disables it; it does not remove feature code.</footer>
+  </main>
+</body>
+</html>

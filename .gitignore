@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+.DS_Store
+data/
+
+# Runner credentials and deployment evidence never belong in source control.
+.runner
+.credentials*
+_work/

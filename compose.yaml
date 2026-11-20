@@ -1,0 +1,22 @@
+name: trunk-lab-local
+
+services:
+  app:
+    image: ${LAB_IMAGE:-trunk-lab:local}
+    init: true
+    ports:
+      - "127.0.0.1:3010:3000"
+    environment:
+      APP_ENV: LOCAL
+      FLAGS_FILE: /app/data/local-flags.json
+      FLAGS_ADMIN_PASSWORD: ${FLAGS_ADMIN_PASSWORD:?Set FLAGS_ADMIN_PASSWORD in your ignored .env file}
+      FEATURE_BULK_DISCOUNT: ${FEATURE_BULK_DISCOUNT:-false}
+      DEMO_FAULT: ${DEMO_FAULT:-none}
+      RELEASE_IDENTITY: ${RELEASE_IDENTITY:-unreleased}
+    volumes:
+      - flags:/app/data
+    read_only: true
+    restart: unless-stopped
+
+volumes:
+  flags:
