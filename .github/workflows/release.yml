@@ -184,13 +184,14 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: write
       issues: write
     outputs:
       tag: ${{ needs.verify-dev.outputs.tag }}
       sha: ${{ needs.verify-dev.outputs.sha }}
       version: ${{ needs.verify-dev.outputs.version }}
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       SOURCE_SHA: ${{ needs.verify-dev.outputs.sha }}
       RELEASE_TAG: ${{ needs.verify-dev.outputs.tag }}
     steps:
