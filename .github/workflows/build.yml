@@ -7,7 +7,6 @@ on:
 permissions:
   contents: read
 
-# Do not interrupt a publication. Serialize attempts for the same commit.
 concurrency:
   group: build-${{ github.sha }}
   cancel-in-progress: false
@@ -18,191 +17,61 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   publish:
-    name: Publish image and provenance
+    name: Build the demo image
     needs: ci
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     permissions:
       contents: read
-      actions: read
       packages: write
       id-token: write
       attestations: write
-    env:
-      IMAGE_NAME: ghcr.io/devansh-helfie/trunk-based-development-lab
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
     steps:
-      - name: Find a successful publication for this commit
-        id: previous
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api --paginate --method GET \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
-            -f head_sha="$GITHUB_SHA" -f event=push -f status=success \
-            --jq '.workflow_runs[] | [.id, .run_attempt] | @tsv' > successful-builds.tsv
-          # A rerun keeps its run ID; its previous success is not in the list above.
-          for ((attempt=1; attempt<GITHUB_RUN_ATTEMPT; attempt++)); do
-            conclusion=$(gh api \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$attempt" \
-              --jq '.conclusion')
-            if [[ "$conclusion" == success ]]; then
-              printf '%s\t%s\n' "$GITHUB_RUN_ID" "$attempt" >> successful-builds.tsv
-            fi
-          done
-          previous=$(sort -n successful-builds.tsv | sed -n '1p')
-          if [[ -n "$previous" ]]; then
-            read -r run_id attempt <<< "$previous"
-            echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-            echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
-            echo "found=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Check out the tested commit
+      - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        if: steps.previous.outputs.found == 'false'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Authenticate to GHCR
+      - name: Sign in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Load and validate the existing build evidence
-        id: existing
-        if: steps.previous.outputs.found == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PREVIOUS_RUN_ID: ${{ steps.previous.outputs.run_id }}
-          PREVIOUS_ATTEMPT: ${{ steps.previous.outputs.attempt }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh run download "$PREVIOUS_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "build-evidence-$GITHUB_SHA-$PREVIOUS_ATTEMPT" --dir existing-build
-          evidence=existing-build/build-evidence.json
-          jq -e --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
-            --arg image "$IMAGE_NAME" '
-            .schemaVersion == 1 and .repository == $repository and .commitSha == $sha and
-            .platform == "linux/arm64" and (.digest | test("^sha256:[a-f0-9]{64}$")) and
-            .image == ($image + "@" + .digest) and
-            .build.workflow == ".github/workflows/build.yml" and
-            (.build.runId | test("^[1-9][0-9]*$")) and
-            (.build.runAttempt | test("^[1-9][0-9]*$"))' "$evidence" > /dev/null
-          run_id=$(jq -r '.build.runId' "$evidence")
-          attempt=$(jq -r '.build.runAttempt' "$evidence")
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" \
-            > original-build-run.json
-          jq -e --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
-            --arg run_id "$run_id" --arg attempt "$attempt" '
-            .conclusion == "success" and .event == "push" and .head_branch == "main" and
-            .head_sha == $sha and .repository.full_name == $repository and
-            (.path | split("@")[0]) == ".github/workflows/build.yml" and
-            (.id | tostring) == $run_id and (.run_attempt | tostring) == $attempt' \
-            original-build-run.json > /dev/null
-          echo "digest=$(jq -r '.digest' "$evidence")" >> "$GITHUB_OUTPUT"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push
-        if: steps.previous.outputs.found == 'false'
+      - name: Build and push the demo image
         id: image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
-          # Keep the small evidence artifact; omit the optional Docker build archive.
           DOCKER_BUILD_RECORD_UPLOAD: 'false'
         with:
           context: .
           platforms: linux/arm64
           push: true
-          tags: ${{ env.IMAGE_NAME }}:build-${{ github.run_id }}-${{ github.run_attempt }}
+          tags: ghcr.io/devansh-helfie/trunk-based-development-lab:build-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
             COMMIT_SHA=${{ github.sha }}
             BUILD_RUN_ID=${{ github.run_id }}
 
-      - name: Attest the published digest
-        if: steps.previous.outputs.found == 'false'
-        id: provenance
+      - name: Attest the image
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ${{ env.IMAGE_NAME }}
+          subject-name: ghcr.io/devansh-helfie/trunk-based-development-lab
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
           create-storage-record: false
 
-      - name: Verify the signed build provenance
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IMAGE_DIGEST: ${{ steps.existing.outputs.digest || steps.image.outputs.digest }}
-          ORIGINAL_RUN_ID: ${{ steps.existing.outputs.run_id || github.run_id }}
-          ORIGINAL_ATTEMPT: ${{ steps.existing.outputs.attempt || github.run_attempt }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh attestation verify "oci://$IMAGE_NAME@$IMAGE_DIGEST" \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/build.yml" \
-            --source-ref refs/heads/main --source-digest "$GITHUB_SHA" \
-            --deny-self-hosted-runners --format json > attestation-verification.json
-          invocation="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$ORIGINAL_RUN_ID/attempts/$ORIGINAL_ATTEMPT"
-          jq -e --arg invocation "$invocation" \
-            'any(.[]; .verificationResult.statement.predicate.runDetails.metadata.invocationId == $invocation)' \
-            attestation-verification.json > /dev/null
-
-      - name: Record the successful build evidence
-        env:
-          IMAGE_DIGEST: ${{ steps.existing.outputs.digest || steps.image.outputs.digest }}
-          ATTESTATION_URL: ${{ steps.provenance.outputs.attestation-url }}
-          REUSED: ${{ steps.previous.outputs.found }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$REUSED" == true ]]; then
-            # Preserve the original build identity, not this reuse run's identity.
-            cp existing-build/build-evidence.json build-evidence.json
-          else
-            jq -n \
-              --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
-              --arg image "$IMAGE_NAME@$IMAGE_DIGEST" --arg digest "$IMAGE_DIGEST" \
-              --arg runId "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
-              --arg attestation "$ATTESTATION_URL" \
-              '{schemaVersion: 1, repository: $repository, commitSha: $sha,
-                image: $image, digest: $digest, platform: "linux/arm64",
-                build: {runId: $runId, runAttempt: $attempt, workflow: ".github/workflows/build.yml"},
-                ci: {runId: $runId, runAttempt: $attempt, workflow: ".github/workflows/ci.yml", job: "ci"},
-                attestationUrl: $attestation}' > build-evidence.json
-          fi
-          jq --argjson reused "$REUSED" \
-            --arg runId "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
-            '. + {reused: $reused, publication: {runId: $runId, runAttempt: $attempt}}' \
-            build-evidence.json > updated-evidence.json
-          mv updated-evidence.json build-evidence.json
-          {
-            echo "### Published image"
-            echo
-            echo "Commit: $GITHUB_SHA"
-            echo
-            echo "Image: $IMAGE_NAME@$IMAGE_DIGEST"
-            echo
-            echo "Reused successful build: $REUSED"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Retain build evidence
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: build-evidence-${{ github.sha }}-${{ github.run_attempt }}
-          path: |
-            build-evidence.json
-            attestation-verification.json
-          if-no-files-found: error
-          retention-days: 7
+  deploy-dev:
+    name: Deploy DEV
+    needs: publish
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      image-digest: ${{ needs.publish.outputs.digest }}

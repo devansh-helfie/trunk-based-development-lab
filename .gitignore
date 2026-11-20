@@ -11,3 +11,6 @@ data/
 .runner
 .credentials*
 _work/
+
+# Local snapshots of deferred POC designs.
+.backups/
