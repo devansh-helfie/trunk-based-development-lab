@@ -89,6 +89,13 @@ jobs:
             [[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'RC number must be a positive integer.'; exit 1; }
           fi
 
+      - name: Check out trusted main history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Require a merged Release Please PR targeting main
         if: inputs.operation == 'test'
         id: metadata-pr
@@ -108,13 +115,6 @@ jobs:
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Rollback requires an existing tag such as v2.0.0 or v2.0.0-rc.1.'; exit 1; }
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft == false' | grep -qx true
-
-      - name: Check out trusted main history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
 
       - name: Resolve the source and require main ancestry
         id: source
