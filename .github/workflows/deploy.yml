@@ -16,9 +16,6 @@ on:
       release-tag:
         type: string
         default: unreleased
-      demo-fault:
-        type: string
-        default: none
 
 permissions:
   contents: read
@@ -34,6 +31,8 @@ jobs:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: [self-hosted, macOS, ARM64, trunk-lab-deploy]
     timeout-minutes: 10
+    environment:
+      name: ${{ inputs.environment }}
     concurrency:
       group: personal-trunk-lab-${{ inputs.environment }}
       cancel-in-progress: false
@@ -45,9 +44,18 @@ jobs:
       ENVIRONMENT_SLUG: ${{ inputs.environment == 'PROD' && 'prod' || inputs.environment == 'TEST' && 'test' || 'dev' }}
       APP_PORT: ${{ inputs.environment == 'PROD' && '3003' || inputs.environment == 'TEST' && '3002' || '3001' }}
       RELEASE_IDENTITY: ${{ inputs.release-tag }}
-      DEMO_FAULT: ${{ inputs.demo-fault }}
+      QA_DEMO: ${{ vars.QA_DEMO || 'pass' }}
+      DEMO_FAULT: ${{ inputs.environment == 'TEST' && vars.QA_DEMO == 'fail' && 'discount-boundary' || 'none' }}
       BUILD_RUN_ID: ${{ github.run_id }}
     steps:
+      - name: Validate the TEST demonstration setting
+        if: inputs.environment == 'TEST'
+        run: |
+          case "$QA_DEMO" in
+            pass|fail) ;;
+            *) echo 'Set the TEST environment variable QA_DEMO to pass or fail.'; exit 1 ;;
+          esac
+
       - name: Check out deployment configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
