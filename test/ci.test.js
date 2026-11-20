@@ -7,7 +7,7 @@ test('basic CI: health, metadata, ordinary quote and input validation', async (c
   const baseUrl = await serve(createApp(configuration({ ...process.env, FLAGS_FILE: ':memory:' })), context);
   const health = await fetch(`${baseUrl}/health`);
   assert.equal(health.status, 200);
-  assert.equal((await health.json()).status, 'ok');
+  assert.equal((await health.json()).status, 'healthy');
   const version = await (await fetch(`${baseUrl}/version`)).json();
   assert.equal(version.application, 'trunk-based-development-lab');
   assert.match(version.version, /^\d+\.\d+\.\d+$/);

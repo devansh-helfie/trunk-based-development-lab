@@ -139,7 +139,9 @@ Backend code stays small and grouped by purpose:
 - `src/flags.js`: flag validation, revisions and file persistence.
 - `src/server.js`: local startup and shutdown.
 
-- `GET /health`: health and application environment.
+- `GET /health`: returns `status: "healthy"` and the application environment.
+  Breaking change: clients expecting `status: "ok"` must accept `"healthy"`.
+  HTTP status remains 200; the container health check uses the HTTP status.
 - `GET /version`: package version, source/build declarations and active configuration.
 - `GET /api/features`: current feature flags.
 - `POST /api/quote`: quantity from 1 to 100, unit price 1000 cents.
