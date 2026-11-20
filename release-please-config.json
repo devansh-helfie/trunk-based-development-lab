@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "draft-pull-request": true,
+  "bootstrap-sha": "d624de8781f4a29b732723b134a942d07483d461",
+  "pull-request-title-pattern": "chore: PLT-1652 release ${version}",
+  "group-pull-request-title-pattern": "chore: PLT-1652 release ${version}",
+  "pull-request-header": "**Ticket:** [PLT-1652](https://products-helfie.atlassian.net/browse/PLT-1652)\n\n## User-Facing Changes\n\nSee the generated release notes below.\n\n## Technical Changes\n\nUpdate package version, lockfile and changelog.\n\n## Feature Flags\n\nNone\n\n## Risks\n\nRelease metadata does not grant QA sign-off or production approval.\n",
+  "packages": {
+    ".": {}
+  }
+}

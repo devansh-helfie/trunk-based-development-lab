@@ -7,6 +7,18 @@ on:
         description: Image built by the current workflow run
         required: true
         type: string
+      source-sha:
+        required: true
+        type: string
+      environment:
+        type: string
+        default: DEV
+      release-tag:
+        type: string
+        default: unreleased
+      demo-fault:
+        type: string
+        default: none
 
 permissions:
   contents: read
@@ -17,31 +29,37 @@ defaults:
     shell: bash
 
 jobs:
-  dev:
-    name: Deploy DEV
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  app:
+    name: Deploy ${{ inputs.environment }}
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: [self-hosted, macOS, ARM64, trunk-lab-deploy]
     timeout-minutes: 10
     concurrency:
-      group: personal-trunk-lab-dev
+      group: personal-trunk-lab-${{ inputs.environment }}
       cancel-in-progress: false
     env:
       LAB_IMAGE: ghcr.io/devansh-helfie/trunk-based-development-lab@${{ inputs.image-digest }}
       IMAGE_DIGEST: ${{ inputs.image-digest }}
-      COMMIT_SHA: ${{ github.sha }}
+      COMMIT_SHA: ${{ inputs.source-sha }}
+      APP_ENV: ${{ inputs.environment }}
+      ENVIRONMENT_SLUG: ${{ inputs.environment == 'PROD' && 'prod' || inputs.environment == 'TEST' && 'test' || 'dev' }}
+      APP_PORT: ${{ inputs.environment == 'PROD' && '3003' || inputs.environment == 'TEST' && '3002' || '3001' }}
+      RELEASE_IDENTITY: ${{ inputs.release-tag }}
+      DEMO_FAULT: ${{ inputs.demo-fault }}
       BUILD_RUN_ID: ${{ github.run_id }}
     steps:
       - name: Check out deployment configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source-sha }}
           persist-credentials: false
 
-      - name: Use Docker Desktop and existing DEV settings
+      - name: Use Docker Desktop and local environment settings
         run: |
           echo '/Applications/Docker.app/Contents/Resources/bin' >> "$GITHUB_PATH"
           echo "DOCKER_HOST=unix://$HOME/.docker/run/docker.sock" >> "$GITHUB_ENV"
           echo "DOCKER_CONFIG=$RUNNER_TEMP/trunk-lab-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-          echo "DEV_ENV_FILE=$HOME/.local/share/trunk-based-development-lab/environments/dev/.env" >> "$GITHUB_ENV"
+          echo "APP_ENV_FILE=$HOME/.local/share/trunk-based-development-lab/environments/$ENVIRONMENT_SLUG/.env" >> "$GITHUB_ENV"
 
       - name: Use private file-based credentials instead of macOS Keychain
         run: |
@@ -56,14 +74,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Deploy DEV
+      - name: Deploy the demo environment
         run: |
-          test -f "$DEV_ENV_FILE" || { echo 'Run bash scripts/setup-dev.sh on the Mac first.'; exit 1; }
-          docker compose --project-name trunk-lab-dev --env-file "$DEV_ENV_FILE" \
-            --file compose.dev.yaml up --detach --no-build --pull always --wait --wait-timeout 90
+          test -f "$APP_ENV_FILE" || { echo 'Run scripts/setup-env.sh for this environment on the Mac first.'; exit 1; }
+          docker compose --project-name "trunk-lab-$ENVIRONMENT_SLUG" --env-file "$APP_ENV_FILE" \
+            --file compose.demo.yaml up --detach --no-build --pull always --wait --wait-timeout 90
 
-      - name: Check the running DEV version
+      - name: Check the running version
         run: |
-          curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3001/version |
-            jq -e --arg sha "$COMMIT_SHA" --arg digest "$IMAGE_DIGEST" \
-              '.environment == "DEV" and .commitSha == $sha and .imageDigest == $digest'
+          curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:$APP_PORT/version" |
+            jq -e --arg environment "$APP_ENV" --arg sha "$COMMIT_SHA" --arg digest "$IMAGE_DIGEST" \
+              '.environment == $environment and .commitSha == $sha and .imageDigest == $digest'
