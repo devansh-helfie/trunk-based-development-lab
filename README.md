@@ -268,11 +268,11 @@ Docker build-record uploads are disabled, and this simplified flow uploads no
 additional Actions evidence artifacts.
 
 Build passes its resulting image digest directly to reusable Deploy. The Mac
-runner pulls it and starts project `trunk-lab-dev` using `compose.dev.yaml`.
+runner pulls it and starts project `trunk-lab-dev` using `compose.demo.yaml`.
 This handoff is for the current run; it is not a build-once/deploy-many promotion
 contract. Deployment verification across release environments is deferred.
 
-Run `bash scripts/setup-dev.sh` once on the Mac before enabling deployment.
+Run `bash scripts/setup-env.sh DEV` once on the Mac before enabling deployment.
 The script creates the DEV directory and a private password file, preserving
 existing settings. Environment setup stays outside the deployment workflow.
 DEV binds to `http://dev.localhost:3001/flags`, has an independent flag volume,
@@ -318,36 +318,63 @@ The fault switch is local teaching scaffolding. Turning it off is not a source
 fix, a QA approval or permission to deploy. The later QA-fix milestone will
 demonstrate a real code change on main, a new artifact and revalidation.
 
-Release Please will update package.json and the changelog in a later approved
-milestone. RC and stable tags will identify already-built artifacts. No rebuild
-on tag creation and no unvalidated metadata commit after QA are intended.
-Release Please runs on demand. Its short-lived metadata PR is reviewed, merged
-and deleted before candidate building. No stabilization branch is planned;
-failed candidates are replaced through new main commits.
+### TEST preparation, local draft
 
-## Future release modes, artifact reuse deferred
+Merging to main automatically builds and deploys DEV. Manually run Release from
+main after that commit's DEV pipeline succeeds. No PROD jobs are included.
 
-Both modes are future design, not implemented release workflows. Their
-shared-artifact promotion rules are deferred while the POC focuses on the Git
-and Release Please flow. The mode is
-selected when preparing the release, defaults to RC, and stays fixed for that release. A production
-dispatch must not switch modes to bypass candidate verification.
+1. Select `tag-mode: rc` (default) or `stable`. RC mode also takes `rc-number`,
+   a positive integer starting at 1. Select `qa-demo: pass` or `fail`.
+2. The workflow requires a successful main build and DEV deployment for the
+   dispatch commit. It fails immediately if DEV has not passed; it does not poll.
+3. Release Please opens or updates the draft version/changelog PR and calculates
+   the next version from Conventional Commits, starting from baseline 1.2.3.
+4. The workflow reads that proposed version from the draft manifest and creates
+   a real tag on the already DEV-verified dispatch commit. For example, a proposed
+   1.3.0 becomes `v1.3.0-rc.1` in RC mode or `v1.3.0` in stable mode. It publishes
+   a GitHub prerelease for RC, or a regular release for stable. Neither is marked
+   latest by this TEST workflow. If main advanced during preparation, the run
+   stops before tagging; prepare again after the new DEV deployment passes.
+5. TEST rebuilds the tagged source and deploys it on port 3002. The workflow
+   directly calls Build/Deploy because tags created by GITHUB_TOKEN do not trigger
+   another workflow automatically. Runtime release identity shows the real tag.
+6. QA checks live TEST pricing and configuration. `fail` injects the discount
+   boundary defect and causes a failed run. `pass` checks normal behavior. The
+   run records the tag, commit and verified configuration. This is automated QA
+   evidence; human sign-off and PROD promotion remain deferred.
 
-- RC mode: prepare metadata, build the main commit once, tag an existing successful
-  artifact as `v1.3.0-rc.1`, deploy it to TEST and record QA sign-off. After
-  verification, create `v1.3.0` on that same commit and promote the same digest.
-  A fix produces a new main commit, new artifact and `v1.3.0-rc.2`.
-- Direct mode: prepare metadata, build once, create `v1.3.0`, deploy that tag's
-  artifact to TEST, then promote the exact same tag/commit/digest to PROD only
-  after verified QA. There is no RC tag requirement in this mode. Tag creation
-  does not mean QA passed. If QA fails and code changes, the published tag is
-  retained and the replacement uses a new version such as `v1.3.1`.
+Release Please owns version calculation and the metadata PR. The small tag step
+owns publication on the existing DEV commit, allowing TEST before a metadata PR
+merge. This differs from Release Please's native publication after PR merge.
+Package version remains the selected commit's version; release identity shows
+the new tag. The draft metadata PR stays unmerged during this milestone.
 
-Both modes use the same build and deployment workflows, mandatory TEST evidence,
-manual QA sign-off, configuration verification, release-blocker checks and production
-approval. Tags are never renamed, moved or overwritten. Tag creation never rebuilds
-the image. Release Please remains the on-demand version/changelog PR preparation
-tool. Stabilization release branches remain excluded.
+Existing tags are reused only when they directly reference the same source SHA.
+A tag on another commit fails preparation and is never moved. To test another
+commit, use a new RC number or a new stable version. QA failure leaves the release
+published but unverified. Fix code through main or rerun the same commit with
+normal QA behavior. A regular GitHub release alone does not imply QA approval.
+
+Before running on GitHub:
+
+- Publish these workflow changes through a PR and let their main DEV run pass.
+- Allow GitHub Actions to create PRs in the repository's Actions settings.
+- Run `bash scripts/setup-env.sh TEST` on the personal Mac. DEV and TEST use
+  separate protected settings, flag volumes and ports. New TEST settings seed
+  bulkDiscount on. Configure any existing TEST flag explicitly if it differs;
+  QA never changes its expectation to match the app.
+
+Rebuilding is deliberate for this POC; identical artifact promotion is deferred.
+Main builds retain the standard attestation action. Manual TEST builds do not
+attest. No Release workflow has run and TEST has not been deployed by this draft.
+
+## Future promotion milestones
+
+Human QA sign-off, RC-to-stable promotion on the same verified commit, PROD
+promotion, ZIP deployment and same-digest artifact reuse remain future work.
+Before integrating the metadata PR with publication, reconcile its new commit
+and version baseline so earlier QA is never used to approve a different SHA.
+Earlier designs are retained in `.backups/`.
 
 ## Learning log
 
@@ -377,7 +404,9 @@ tool. Stabilization release branches remain excluded.
 - Not activated: required PR checks.
 - Registry publication and attestation succeeded once; automatic DEV is a local draft.
 - Deferred build-once/deploy-many after the user simplified the POC scope.
-- Not implemented: Release Please, ZIP packaging, TEST/PROD deployments and QA gates.
+- Local draft: on-demand Release Please draft preparation and TEST QA.
+- Not live-verified: TEST deployment and QA. PROD promotion is deferred.
+- Deferred: RC sequencing, ZIP packaging and build-once/deploy-many.
 
 ## Next milestones, each requiring approval
 

@@ -3,17 +3,17 @@ services:
     image: ${LAB_IMAGE:?Use the verified image digest from the build manifest}
     init: true
     ports:
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:${APP_PORT:?Set the demo port}:3000"
     environment:
-      APP_ENV: DEV
-      FLAGS_FILE: /app/data/dev-flags.json
+      APP_ENV: ${APP_ENV:?Set DEV, TEST or PROD}
+      FLAGS_FILE: /app/data/${ENVIRONMENT_SLUG:?Set the environment name}-flags.json
       FLAGS_ADMIN_PASSWORD: ${FLAGS_ADMIN_PASSWORD:?DEV password must be configured}
-      FEATURE_BULK_DISCOUNT: "false"
-      DEMO_FAULT: none
+      FEATURE_BULK_DISCOUNT: ${FEATURE_BULK_DISCOUNT:-false}
+      DEMO_FAULT: ${DEMO_FAULT:-none}
       COMMIT_SHA: ${COMMIT_SHA:?Source SHA must be recorded}
       BUILD_RUN_ID: ${BUILD_RUN_ID:?Build run must be recorded}
       IMAGE_DIGEST: ${IMAGE_DIGEST:?Image digest must be recorded}
-      RELEASE_IDENTITY: unreleased
+      RELEASE_IDENTITY: ${RELEASE_IDENTITY:-unreleased}
     volumes:
       - flags:/app/data
     read_only: true

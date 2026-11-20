@@ -1,0 +1,183 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag-mode:
+        description: Tag format for TEST
+        type: choice
+        options: [rc, stable]
+        default: rc
+      rc-number:
+        description: RC sequence, used only in RC mode
+        type: string
+        default: '1'
+      qa-demo:
+        description: TEST pricing behavior for the QA demonstration
+        type: choice
+        options: [pass, fail]
+        default: pass
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  verify-dev:
+    name: Require the selected commit to have passed DEV
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Validate the RC sequence
+        if: inputs.tag-mode == 'rc'
+        env:
+          RC_NUMBER: ${{ inputs.rc-number }}
+        run: '[[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]]'
+
+      - name: Check the main build and DEV deployment result
+        run: |
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
+            -f head_sha="$GITHUB_SHA" -f event=push -f status=success -f per_page=1 \
+            --jq '.total_count > 0' | grep -qx true
+
+  release:
+    name: Prepare and tag the TEST release
+    needs: verify-dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      tag: ${{ steps.tag.outputs.name }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Calculate the version with Release Please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+
+      - name: Read the proposed version and select the TEST tag
+        id: tag
+        env:
+          RELEASE_BRANCH: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || 'release-please--branches--main' }}
+          TAG_MODE: ${{ inputs.tag-mode }}
+          RC_NUMBER: ${{ inputs.rc-number }}
+        run: |
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/.release-please-manifest.json" \
+            -f ref="$RELEASE_BRANCH" --jq '.content' | base64 --decode > proposed-version.json
+          version=$(jq -er '.["."] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' proposed-version.json)
+          tag="v$version"
+          if [[ "$TAG_MODE" == 'rc' ]]; then
+            tag="$tag-rc.$RC_NUMBER"
+          fi
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Require main to remain on the selected DEV commit
+        run: |
+          current_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')
+          [[ "$current_sha" == "$GITHUB_SHA" ]] || { echo 'Main advanced. Prepare again after its DEV deployment passes.'; exit 1; }
+
+      - name: Create the tag or reuse it on the same commit
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > tag.json 2> tag-error.log; then
+            jq -e --arg sha "$GITHUB_SHA" '.object.type == "commit" and .object.sha == $sha' tag.json
+          elif grep -q 'HTTP 404' tag-error.log; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA"
+          else
+            cat tag-error.log >&2
+            exit 1
+          fi
+
+      - name: Publish the TEST release
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+          TAG_MODE: ${{ inputs.tag-mode }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease > release.json; then
+            jq -e --arg mode "$TAG_MODE" '.isPrerelease == ($mode == "rc")' release.json
+          else
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$RELEASE_TAG" --generate-notes --latest=false --prerelease="$([[ "$TAG_MODE" == 'rc' ]] && echo true || echo false)"
+          fi
+
+  test:
+    name: Build and deploy TEST
+    needs: release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/build.yml
+    with:
+      source-ref: ${{ github.sha }}
+      environment: TEST
+      release-tag: ${{ needs.release.outputs.tag }}
+      demo-fault: ${{ inputs.qa-demo == 'fail' && 'discount-boundary' || 'none' }}
+
+  qa:
+    name: Run QA against TEST
+    needs: [release, test]
+    runs-on: [self-hosted, macOS, ARM64, trunk-lab-deploy]
+    timeout-minutes: 10
+    outputs:
+      configuration: ${{ steps.target.outputs.configuration }}
+    env:
+      BASE_URL: http://127.0.0.1:3002
+      QA_EXPECT_BULK_DISCOUNT: 'true'
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      - name: Check out the release QA checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install the locked QA dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run the real pricing and configuration checks
+        run: npm run test:qa
+
+      - name: Record the verified TEST configuration
+        id: target
+        run: |
+          curl --fail --silent --show-error "$BASE_URL/version" > qa-target.json
+          jq -e --arg sha "$RELEASE_SHA" --arg tag "$RELEASE_TAG" \
+            '.environment == "TEST" and .commitSha == $sha and .releaseIdentity == $tag' qa-target.json
+          echo "configuration=$(jq -r '.configurationId' qa-target.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize the TEST result
+        env:
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          echo "TEST QA passed for $RELEASE_SHA ($RELEASE_TAG)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Evidence: $GH_RUN_URL. No PROD deployment was created." >> "$GITHUB_STEP_SUMMARY"

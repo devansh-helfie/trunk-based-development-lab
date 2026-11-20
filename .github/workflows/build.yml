@@ -3,18 +3,34 @@ name: Build
 on:
   push:
     branches: [main]
+  workflow_call:
+    inputs:
+      source-ref:
+        type: string
+        default: ''
+      environment:
+        type: string
+        default: DEV
+      release-tag:
+        type: string
+        default: unreleased
+      demo-fault:
+        type: string
+        default: none
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.sha }}
+  group: build-${{ inputs.environment || 'DEV' }}-${{ inputs.source-ref || github.sha }}
   cancel-in-progress: false
 
 jobs:
   ci:
     name: CI
     uses: ./.github/workflows/ci.yml
+    with:
+      source-ref: ${{ inputs.source-ref || github.sha }}
 
   publish:
     name: Build the demo image
@@ -28,11 +44,17 @@ jobs:
       attestations: write
     outputs:
       digest: ${{ steps.image.outputs.digest }}
+      source-sha: ${{ steps.source.outputs.sha }}
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
+
+      - name: Record the selected source commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -53,12 +75,15 @@ jobs:
           context: .
           platforms: linux/arm64
           push: true
-          tags: ghcr.io/devansh-helfie/trunk-based-development-lab:build-${{ github.run_id }}-${{ github.run_attempt }}
+          tags: ghcr.io/devansh-helfie/trunk-based-development-lab:build-${{ inputs.environment || 'DEV' }}-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
-            COMMIT_SHA=${{ github.sha }}
+            COMMIT_SHA=${{ steps.source.outputs.sha }}
             BUILD_RUN_ID=${{ github.run_id }}
 
-      - name: Attest the image
+      # The attestation identity must match the event SHA. Release rebuilds may
+      # check out an older release commit, so attestation remains on main builds.
+      - name: Attest the main image
+        if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ghcr.io/devansh-helfie/trunk-based-development-lab
@@ -66,8 +91,8 @@ jobs:
           push-to-registry: true
           create-storage-record: false
 
-  deploy-dev:
-    name: Deploy DEV
+  deploy:
+    name: Deploy ${{ inputs.environment || 'DEV' }}
     needs: publish
     permissions:
       contents: read
@@ -75,3 +100,7 @@ jobs:
     uses: ./.github/workflows/deploy.yml
     with:
       image-digest: ${{ needs.publish.outputs.digest }}
+      source-sha: ${{ needs.publish.outputs.source-sha }}
+      environment: ${{ inputs.environment || 'DEV' }}
+      release-tag: ${{ inputs.release-tag || 'unreleased' }}
+      demo-fault: ${{ inputs.demo-fault || 'none' }}
