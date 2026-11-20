@@ -380,6 +380,15 @@ use rollback to restore an already published application version.
 ### Setup and current limits
 
 - Allow GitHub Actions to create PRs in the repository's Actions settings.
+- The automatic GITHUB_TOKEN is the default. GitHub can reject creation of a
+  historical tag with HTTP 403 when additional Workflows write permission is
+  required. For unattended historical publication, optionally configure the
+  repository Actions secret `RELEASE_TOKEN` using a fine-grained token limited to
+  this personal repository with Contents, Workflows and Pull requests write access.
+  It is used only by the publication job. No token is required for tag reuse.
+  Alternatively, create the exact tag with your existing authorized personal
+  CLI login, then rerun the failed jobs. The workflow always verifies its SHA.
+  No credential is created or stored by this workflow change.
 - Run `bash scripts/setup-env.sh TEST` on the personal Mac. Each environment
   has separate private settings, flag volume and port. New TEST settings seed
   bulkDiscount on. Configure existing TEST flags explicitly if needed.
