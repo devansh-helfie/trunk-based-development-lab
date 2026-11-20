@@ -41,7 +41,7 @@ export function createApp(config = configuration()) {
   });
 
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', environment: config.environment });
+    res.json({ status: 'healthy', environment: config.environment });
   });
 
   app.get('/version', (_req, res) => {
