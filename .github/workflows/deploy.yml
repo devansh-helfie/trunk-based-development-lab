@@ -50,28 +50,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check whether this main commit is still current
-        id: target
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
-          if [[ "$latest" == "$COMMIT_SHA" ]]; then
-            echo 'deploy=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'deploy=false' >> "$GITHUB_OUTPUT"
-            echo 'Skipped DEV: a newer main commit exists.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Deploy DEV
-        if: steps.target.outputs.deploy == 'true'
         run: |
           test -f "$DEV_ENV_FILE" || { echo 'Run bash scripts/setup-dev.sh on the Mac first.'; exit 1; }
           docker compose --project-name trunk-lab-dev --env-file "$DEV_ENV_FILE" \
             --file compose.dev.yaml up --detach --no-build --pull always --wait --wait-timeout 90
 
       - name: Check the running DEV version
-        if: steps.target.outputs.deploy == 'true'
         run: |
           curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3001/version |
             jq -e --arg sha "$COMMIT_SHA" --arg digest "$IMAGE_DIGEST" \

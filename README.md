@@ -279,7 +279,7 @@ and uses its password from the protected file
 Its `/version` endpoint shows DEV, commit, current build run and image digest.
 The existing LOCAL app on port 3010 stays separate. No Azure resources are used.
 
-Deployments are serialized and stale main runs are skipped. The workflow only
+Every successful main build triggers DEV deployment; deployments are serialized. The workflow only
 checks out deployment configuration, connects to Docker Desktop, signs in to
 GHCR, deploys with Compose and checks the running version. Setup scripts handle
 local prerequisites. Failed startup or version checks fail the workflow;
