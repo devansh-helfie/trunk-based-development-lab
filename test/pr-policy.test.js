@@ -21,47 +21,45 @@ None
 
 function pr(overrides = {}) {
   return { title: 'feat: ABC-123 show running release identity',
-    labels: [{ name: 'semver:minor' }], body, ...overrides };
+    body, ...overrides };
 }
 
-for (const [title, label] of [
-  ['feat: ABC-123 show version', 'semver:minor'],
-  ['fix(api): ABC-123 correct the price', 'semver:patch'],
-  ['feat!: ABC-123 change the API contract', 'semver:major'],
-  ['fix(api)!: ABC-123 reject legacy inputs', 'semver:major'],
-  ['docs: ABC-123 update instructions', 'semver:none'],
-  ['ci: ABC-123 validate PR labels', 'semver:none']
+for (const [title, classification] of [
+  ['feat: ABC-123 show version', 'minor'],
+  ['fix(api): ABC-123 correct the price', 'patch'],
+  ['feat!: ABC-123 change the API contract', 'major'],
+  ['fix(api)!: ABC-123 reject legacy inputs', 'major'],
+  ['docs: ABC-123 update instructions', 'none'],
+  ['ci: ABC-123 validate PR titles', 'none']
 ]) {
-  test(`valid title/label: ${label} with ${title.split(':')[0]}`, () => {
-    const result = validatePullRequest(pr({ title, labels: [{ name: label }] }));
+  test(`title-only classification: ${classification} with ${title.split(':')[0]}`, () => {
+    const result = validatePullRequest(pr({ title }));
     assert.deepEqual(result.errors, []);
-    assert.equal(result.classification, label);
+    assert.equal(result.classification, classification);
   });
 }
 
-test('missing, conflicting and unknown semantic labels fail', () => {
-  for (const labels of [[], ['semver:minor', 'semver:patch'], ['semver:banana'], ['semver:minor', 'semver:banana']]) {
+test('labels are optional and never control classification', () => {
+  for (const labels of [[], ['semver:patch'], ['semver:minor', 'semver:major'], ['release:1.3.0', 'qa-bug']]) {
     const result = validatePullRequest(pr({ labels }));
-    assert.ok(result.errors.some((error) => error.includes('exactly one valid semantic label')));
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.classification, 'minor');
   }
 });
 
-test('a label change requires a matching Conventional title', () => {
-  const changedLabel = pr({ labels: ['semver:patch'] });
-  assert.ok(validatePullRequest(changedLabel).errors.some((error) => error.includes('title requires semver:minor')));
-  changedLabel.title = 'fix: ABC-123 correct the displayed identity';
-  assert.deepEqual(validatePullRequest(changedLabel).errors, []);
+test('editing the PR title changes the derived classification', () => {
+  const pullRequest = pr();
+  assert.equal(validatePullRequest(pullRequest).classification, 'minor');
+  pullRequest.title = 'fix: ABC-123 correct the displayed identity';
+  assert.equal(validatePullRequest(pullRequest).classification, 'patch');
+  pullRequest.title = 'fix!: ABC-123 change the API contract';
+  assert.equal(validatePullRequest(pullRequest).classification, 'major');
 });
 
-test('minor, patch, major and none labels cannot contradict the title', () => {
-  for (const [title, label] of [
-    ['fix: ABC-123 correct price', 'semver:minor'],
-    ['feat: ABC-123 show version', 'semver:patch'],
-    ['feat: ABC-123 show version', 'semver:major'],
-    ['feat!: ABC-123 change contract', 'semver:minor'],
-    ['docs: ABC-123 update instructions', 'semver:patch']
-  ]) {
-    assert.ok(validatePullRequest(pr({ title, labels: [label] })).errors.length > 0);
+test('malformed, unsupported and multiline titles fail', () => {
+  for (const title of ['Update version', 'feat: show version', 'unknown: ABC-123 show version',
+    'feat(api):ABC-123 show version', 'feat: ABC-123 show version\nfix: ABC-123 hide a change']) {
+    assert.ok(validatePullRequest(pr({ title })).errors.length > 0);
   }
 });
 
@@ -84,11 +82,11 @@ test('normal PRs cannot hide breaking declarations or release overrides in their
   for (const footer of ['BREAKING CHANGE: old API removed', 'Release-As: 9.0.0', 'BEGIN_COMMIT_OVERRIDE']) {
     assert.ok(validatePullRequest(pr({ body: body + '\n' + footer })).errors.length > 0);
   }
-  assert.deepEqual(validatePullRequest(pr({ title: 'feat!: ABC-123 change contract', labels: ['semver:major'],
+  assert.deepEqual(validatePullRequest(pr({ title: 'feat!: ABC-123 change contract',
     body: body + '\nBREAKING CHANGE: old API removed' })).errors, []);
 });
 
-test('release tracking labels neither change classification nor exempt a PR', () => {
-  assert.deepEqual(validatePullRequest(pr({ labels: ['semver:minor', 'release:1.3.0', 'qa-bug'] })).errors, []);
-  assert.ok(validatePullRequest(pr({ labels: ['autorelease: pending', 'release:1.3.0'] })).errors.length > 0);
+test('release lifecycle labels do not exempt malformed PR metadata', () => {
+  const result = validatePullRequest(pr({ title: 'Invalid title', labels: ['autorelease: pending'] }));
+  assert.ok(result.errors.some((error) => error.includes('Use a title')));
 });

@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
   push:
     branches: [main]
 
@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: Validate PR title, labels and body
+      - name: Validate PR title and body
         run: node .github/scripts/validate-pr.mjs
 
   application-tests:
