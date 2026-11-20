@@ -7,9 +7,10 @@ immutable artifacts and QA gates remain the focus.
 ## Current milestone
 
 The application, flag-management panel, local container and local test suites are
-implemented. The first CI push run passed on GitHub for bootstrap commit
-`d624de8`. Its PR-policy job was skipped as expected on a push; actual PR metadata
-validation is pending the first PR. There are no published images, real releases
+implemented. PR #1 passed actual PR metadata and application checks, then squash
+merged as `aa18b3a`; its main CI run `44739490422` passed. Title-only policy is now
+on main. The GHCR build workflow is drafted locally and awaits review, commit,
+push and merge. There are no published images, real releases
 or deployment gates yet. Version `1.2.3` is the
 learning baseline in package.json, not an existing published release.
 
@@ -219,11 +220,12 @@ Run local policy tests with `npm run test:pr-policy`.
 
 ### CI workflow walkthrough
 
-Only `ci.yml` is added now. Its keys have these responsibilities:
+`ci.yml` has these responsibilities:
 
 - `on.pull_request.branches` selects main; `types` reruns checks for new commits,
   title/body edits, including draft PRs. Label changes do not rerun CI.
-- `on.push.branches` tests main after merges and the reviewed bootstrap push.
+- `on.workflow_call` lets Build run these same tests as a prerequisite on main.
+  PRs continue to invoke CI directly; Build owns the main push trigger.
 - `permissions.contents: read` keeps both jobs read-only.
 - `concurrency.group` separates PRs and branch pushes; `cancel-in-progress` cancels
   superseded runs for that PR or ref.
@@ -242,11 +244,71 @@ Only `ci.yml` is added now. Its keys have these responsibilities:
 Base-script checkout does not make workflow edits trusted; branch protection and
 maintainer review remain necessary. Squash-only merging is configured. Previously created semantic labels are
 unused by the new title-only policy. Squash subjects use the PR title with a blank body, and
-merged branches are automatically deleted. Required checks `PR policy` and `Application tests` remain pending the first
-real PR validation. The title-only change is local until reviewed, committed,
-pushed and merged. Because policy uses the base-branch validator, the migration
-PR may need the old semantic label once; subsequent PRs will not require it. Independent approval needs a second
+merged branches are automatically deleted. Actual PR checks passed on PR #1;
+making them required in branch protection remains pending. The migration PR used
+`semver:none` once because its base validator required it; subsequent PRs do not. Independent approval needs a second
 person. Local tests are not claimed as actual GitHub workflow executions.
+
+### Build workflow, awaiting merge and live verification
+
+`build.yml` starts on pushes to main and runs `ci.yml` as a reusable prerequisite
+job. PRs still run CI directly. Publication depends on the reusable CI job passing,
+so the tests, Docker build and signed provenance share the same event SHA.
+The GitHub-hosted `ubuntu-24.04-arm` runner builds `linux/arm64` for the local
+Apple Silicon Mac. The Mac deployment runner does not build or execute PR code.
+
+The workflow uses commit-pinned Docker actions to set up Buildx, authenticate to
+GHCR, build and push. GitHub supplies the job token automatically. Publication
+needs `packages: write`; signed provenance additionally needs `id-token: write`
+and `attestations: write`. `actions: read` allows discovery and validation of earlier builds.
+No manually stored PAT is needed for the build. GHCR package visibility is
+separate from repository visibility; local pulling credentials or public package
+access will be verified in the deployment milestone.
+
+A successful Build run is the accepted publication for that source commit. The
+workflow discovers an earlier successful run or successful attempt of its own
+run ID and downloads that attempt's build-evidence artifact. It validates the
+repository, source SHA, digest, image reference and platform, then checks that the
+original build run/attempt succeeded under this build workflow for the same main
+commit. It verifies the signed provenance again, including the original run's
+invocation ID, before accepting the digest. Reuse skips Buildx setup, image
+building, pushing and signing; it preserves the original build identity and
+records the current reuse run separately.
+
+Missing/expired evidence, conflicting metadata, API failures and failed signature
+verification stop reuse. They never silently select a tag or trigger a rebuild.
+If no successful publication exists, the standard Docker actions build a new
+image. Attempts for a commit are serialized without cancelling an active
+publication. Failed or cancelled runs can be retried; this can produce another
+image if the prior run pushed before failing. Each attempt has its own
+`build-<run-id>-<attempt>` tag. Keep workflow history and evidence artifacts; they
+are required for discovery and reuse. Long-term retention needs a separate design.
+
+`docker/build-push-action` returns the published digest. `actions/attest` binds
+that digest to GitHub-signed build provenance and pushes the attestation to GHCR.
+The workflow verifies the attestation using `gh attestation verify`, requiring
+this repository, `.github/workflows/build.yml`, main, the exact source SHA and a
+GitHub-hosted runner. Image labels are display metadata, not provenance proof.
+
+`build-evidence.json` records the digest, source SHA, workflow run/attempt and
+attestation URL. CI runs as a job within this same workflow run, not as a separate
+run. The evidence and verification result are retained as Actions artifacts for
+7 days for this short POC. The optional Docker build-record artifact upload is
+disabled; only the evidence JSON and attestation verification JSON are uploaded
+by this workflow. Expired evidence stops reuse instead of silently rebuilding.
+These retention settings do not delete the GHCR image or its signed attestation.
+Long-lived release evidence needs durable retention before we rely on it for
+production promotion. Deployment will independently verify provenance, successful run/attempt
+and the selected digest before promotion. Signed provenance alone does not prove
+CI/QA passed or a workflow is trustworthy; reviewed workflow changes and branch
+protection remain necessary. Long-term release evidence retention is later work.
+This milestone does not deploy DEV, create release tags or grant TEST/QA approval.
+
+Workflow validation uses local actionlint and reviewed GitHub Actions runs.
+The custom workflow-reuse test harness was removed to keep this POC focused on
+Git and release workflows. Application tests and PR-policy tests remain in CI.
+Actual publication, successful reuse and failed-verification behavior still need
+to be demonstrated on GitHub; local lint does not prove those outcomes.
 
 ## Release metadata and evidence
 
@@ -316,14 +378,16 @@ tool. Stabilization release branches remain excluded.
 - First CI workflow and PR template drafted; policy scenarios verified locally.
 - Bootstrap commit d624de8 pushed after approval; CI run 44735331133 passed.
 - Configured squash-only merging, PR-title subjects and branch deletion.
-- Superseded mandatory semantic labels with title-only classification; local changes await review.
-- Not activated: real PR metadata validation and required PR checks.
+- PR #1 merged as aa18b3a with PLT-1652; PR checks and subsequent main CI passed.
+- Superseded mandatory semantic labels with title-only classification on main.
+- Drafted standard Docker-action publication and GitHub-signed provenance; live execution awaits merge.
+- Not activated: required PR checks.
 - Not implemented: registry publication, independent DEV/TEST/PROD and production gates.
 
 ## Next milestones, each requiring approval
 
 1. Completed: Docker packaging, reviewed bootstrap commit/push and successful main CI.
-2. Review and merge the title-only policy change, then demonstrate real PR validation.
+2. Completed: title-only policy merged and actual PR metadata validation passed.
 3. Activate required PR checks after verifying real executions.
 4. Add immutable GHCR builds and independent local environments.
 5. Implement on-demand Release Please and RCs without stabilization branches.
