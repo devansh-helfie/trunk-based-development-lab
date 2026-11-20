@@ -14,9 +14,6 @@ on:
       release-tag:
         type: string
         default: unreleased
-      demo-fault:
-        type: string
-        default: none
 
 permissions:
   contents: read
@@ -103,4 +100,3 @@ jobs:
       source-sha: ${{ needs.publish.outputs.source-sha }}
       environment: ${{ inputs.environment || 'DEV' }}
       release-tag: ${{ inputs.release-tag || 'unreleased' }}
-      demo-fault: ${{ inputs.demo-fault || 'none' }}

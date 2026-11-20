@@ -12,11 +12,6 @@ on:
         description: RC sequence, used only in RC mode
         type: string
         default: '1'
-      qa-demo:
-        description: TEST pricing behavior for the QA demonstration
-        type: choice
-        options: [pass, fail]
-        default: pass
 
 permissions:
   contents: read
@@ -134,7 +129,6 @@ jobs:
       source-ref: ${{ github.sha }}
       environment: TEST
       release-tag: ${{ needs.release.outputs.tag }}
-      demo-fault: ${{ inputs.qa-demo == 'fail' && 'discount-boundary' || 'none' }}
 
   qa:
     name: Run QA against TEST

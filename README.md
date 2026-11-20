@@ -324,7 +324,7 @@ Merging to main automatically builds and deploys DEV. Manually run Release from
 main after that commit's DEV pipeline succeeds. No PROD jobs are included.
 
 1. Select `tag-mode: rc` (default) or `stable`. RC mode also takes `rc-number`,
-   a positive integer starting at 1. Select `qa-demo: pass` or `fail`.
+   a positive integer starting at 1. QA behavior comes from the TEST environment.
 2. The workflow requires a successful main build and DEV deployment for the
    dispatch commit. It fails immediately if DEV has not passed; it does not poll.
 3. Release Please opens or updates the draft version/changelog PR and calculates
@@ -338,8 +338,9 @@ main after that commit's DEV pipeline succeeds. No PROD jobs are included.
 5. TEST rebuilds the tagged source and deploys it on port 3002. The workflow
    directly calls Build/Deploy because tags created by GITHUB_TOKEN do not trigger
    another workflow automatically. Runtime release identity shows the real tag.
-6. QA checks live TEST pricing and configuration. `fail` injects the discount
-   boundary defect and causes a failed run. `pass` checks normal behavior. The
+6. QA checks live TEST pricing and configuration. The TEST environment variable
+   `QA_DEMO=fail` injects the discount
+   boundary defect and causes a failed run. `QA_DEMO=pass` checks normal behavior. The
    run records the tag, commit and verified configuration. This is automated QA
    evidence; human sign-off and PROD promotion remain deferred.
 
@@ -359,6 +360,11 @@ Before running on GitHub:
 
 - Publish these workflow changes through a PR and let their main DEV run pass.
 - Allow GitHub Actions to create PRs in the repository's Actions settings.
+- In Settings > Environments > TEST > Environment variables, set `QA_DEMO` to
+  `pass` or `fail`. Missing defaults to pass; any other value fails deployment.
+  The setting is read on deployment, so changing it requires rerunning TEST
+  preparation. DEV and PROD always keep fault injection off. QA assertions
+  remain unchanged and report the real app result.
 - Run `bash scripts/setup-env.sh TEST` on the personal Mac. DEV and TEST use
   separate protected settings, flag volumes and ports. New TEST settings seed
   bulkDiscount on. Configure any existing TEST flag explicitly if it differs;
