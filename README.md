@@ -6,13 +6,19 @@ immutable artifacts and QA gates remain the focus.
 
 ## Current milestone
 
-The application, flag-management panel, local container and local test suites are
-implemented. PR #1 passed actual PR metadata and application checks, then squash
-merged as `aa18b3a`; its main CI run `44739490422` passed. Title-only policy is now
-on main. The GHCR build workflow is drafted locally and awaits review, commit,
-push and merge. There are no published images, real releases
-or deployment gates yet. Version `1.2.3` is the
-learning baseline in package.json, not an existing published release.
+The app, local container and CI are implemented. PR #2 merged as `0d45f4e`;
+Build run `44765657118`, attempt 1, published an image and verified provenance.
+A later artifact-reuse experiment failed during a full rerun.
+
+Build-once/deploy-many and commit-to-artifact promotion are now deferred at the
+user's request. The simplified local draft runs CI, builds a fresh demo image,
+and automatically deploys it to DEV on the Mac. A rerun may build another image.
+The existing LOCAL app remains on port 3010. The new DEV flow awaits review,
+commit, push and merge; it has not deployed yet.
+
+Next focus: trunk-based development, Release Please versions/releases/tags, and
+visible QA pass/fail behavior. ZIP packaging, TEST/PROD gates and artifact reuse
+remain later milestones. The app version `1.2.3` is the learning baseline.
 
 ## Start locally
 
@@ -249,66 +255,47 @@ making them required in branch protection remains pending. The migration PR used
 `semver:none` once because its base validator required it; subsequent PRs do not. Independent approval needs a second
 person. Local tests are not claimed as actual GitHub workflow executions.
 
-### Build workflow, awaiting merge and live verification
+### Simple main-to-DEV demo, awaiting live verification
 
-`build.yml` starts on pushes to main and runs `ci.yml` as a reusable prerequisite
-job. PRs still run CI directly. Publication depends on the reusable CI job passing,
-so the tests, Docker build and signed provenance share the same event SHA.
-The GitHub-hosted `ubuntu-24.04-arm` runner builds `linux/arm64` for the local
-Apple Silicon Mac. The Mac deployment runner does not build or execute PR code.
+A merge to main starts Build. Reusable CI must pass, then standard Docker actions
+build and push an ARM64 image tagged `build-<run-id>-<attempt>`. The standard
+GitHub attestation action remains. This POC no longer searches for an existing
+image, scans build history, downloads evidence records or parses provenance to
+recover original build identities. Every Build execution may build a fresh image.
+Docker build-record uploads are disabled, and this simplified flow uploads no
+additional Actions evidence artifacts.
 
-The workflow uses commit-pinned Docker actions to set up Buildx, authenticate to
-GHCR, build and push. GitHub supplies the job token automatically. Publication
-needs `packages: write`; signed provenance additionally needs `id-token: write`
-and `attestations: write`. `actions: read` allows discovery and validation of earlier builds.
-No manually stored PAT is needed for the build. GHCR package visibility is
-separate from repository visibility; local pulling credentials or public package
-access will be verified in the deployment milestone.
+Build passes its resulting image digest directly to reusable Deploy. The Mac
+runner pulls it and starts project `trunk-lab-dev` using `compose.dev.yaml`.
+This handoff is for the current run; it is not a build-once/deploy-many promotion
+contract. Deployment verification across release environments is deferred.
 
-A successful Build run is the accepted publication for that source commit. The
-workflow discovers an earlier successful run or successful attempt of its own
-run ID and downloads that attempt's build-evidence artifact. It validates the
-repository, source SHA, digest, image reference and platform, then checks that the
-original build run/attempt succeeded under this build workflow for the same main
-commit. It verifies the signed provenance again, including the original run's
-invocation ID, before accepting the digest. Reuse skips Buildx setup, image
-building, pushing and signing; it preserves the original build identity and
-records the current reuse run separately.
+Run `bash scripts/setup-dev.sh` once on the Mac before enabling deployment.
+The script creates the DEV directory and a private password file, preserving
+existing settings. Environment setup stays outside the deployment workflow.
+DEV binds to `http://dev.localhost:3001/flags`, has an independent flag volume,
+and uses its password from the protected file
+`~/.local/share/trunk-based-development-lab/environments/dev/.env`.
+Its `/version` endpoint shows DEV, commit, current build run and image digest.
+The existing LOCAL app on port 3010 stays separate. No Azure resources are used.
 
-Missing/expired evidence, conflicting metadata, API failures and failed signature
-verification stop reuse. They never silently select a tag or trigger a rebuild.
-If no successful publication exists, the standard Docker actions build a new
-image. Attempts for a commit are serialized without cancelling an active
-publication. Failed or cancelled runs can be retried; this can produce another
-image if the prior run pushed before failing. Each attempt has its own
-`build-<run-id>-<attempt>` tag. Keep workflow history and evidence artifacts; they
-are required for discovery and reuse. Long-term retention needs a separate design.
+Deployments are serialized and stale main runs are skipped. The workflow only
+checks out deployment configuration, connects to Docker Desktop, signs in to
+GHCR, deploys with Compose and checks the running version. Setup scripts handle
+local prerequisites. Failed startup or version checks fail the workflow;
+automatic rollback and deployment snapshots are deferred for this POC.
+The local Docker login configuration remains separate from the user's normal
+registry credentials.
 
-`docker/build-push-action` returns the published digest. `actions/attest` binds
-that digest to GitHub-signed build provenance and pushes the attestation to GHCR.
-The workflow verifies the attestation using `gh attestation verify`, requiring
-this repository, `.github/workflows/build.yml`, main, the exact source SHA and a
-GitHub-hosted runner. Image labels are display metadata, not provenance proof.
+The deferred commit-to-artifact draft is preserved under the ignored `.backups/`
+folder, including a restore script and Git state. It was not live-verified and
+should be reviewed again before restoring it. ZIP deployment support remains a
+future adapter, not an implemented Azure Functions deployment.
 
-`build-evidence.json` records the digest, source SHA, workflow run/attempt and
-attestation URL. CI runs as a job within this same workflow run, not as a separate
-run. The evidence and verification result are retained as Actions artifacts for
-7 days for this short POC. The optional Docker build-record artifact upload is
-disabled; only the evidence JSON and attestation verification JSON are uploaded
-by this workflow. Expired evidence stops reuse instead of silently rebuilding.
-These retention settings do not delete the GHCR image or its signed attestation.
-Long-lived release evidence needs durable retention before we rely on it for
-production promotion. Deployment will independently verify provenance, successful run/attempt
-and the selected digest before promotion. Signed provenance alone does not prove
-CI/QA passed or a workflow is trustworthy; reviewed workflow changes and branch
-protection remain necessary. Long-term release evidence retention is later work.
-This milestone does not deploy DEV, create release tags or grant TEST/QA approval.
-
-Workflow validation uses local actionlint and reviewed GitHub Actions runs.
-The custom workflow-reuse test harness was removed to keep this POC focused on
-Git and release workflows. Application tests and PR-policy tests remain in CI.
-Actual publication, successful reuse and failed-verification behavior still need
-to be demonstrated on GitHub; local lint does not prove those outcomes.
+Validation uses local actionlint, Bash syntax checks and Compose configuration
+validation. Actual automatic DEV deployment must still be demonstrated after
+merge. Keep untrusted PR code on GitHub-hosted runners; only reviewed main uses
+the personal Mac deployment runner.
 
 ## Release metadata and evidence
 
@@ -334,9 +321,11 @@ Release Please runs on demand. Its short-lived metadata PR is reviewed, merged
 and deleted before candidate building. No stabilization branch is planned;
 failed candidates are replaced through new main commits.
 
-## Planned release modes
+## Future release modes, artifact reuse deferred
 
-Both modes are agreed design, not implemented release workflows yet. The mode is
+Both modes are future design, not implemented release workflows. Their
+shared-artifact promotion rules are deferred while the POC focuses on the Git
+and Release Please flow. The mode is
 selected when preparing the release, defaults to RC, and stays fixed for that release. A production
 dispatch must not switch modes to bypass candidate verification.
 
@@ -382,14 +371,16 @@ tool. Stabilization release branches remain excluded.
 - Superseded mandatory semantic labels with title-only classification on main.
 - Drafted standard Docker-action publication and GitHub-signed provenance; live execution awaits merge.
 - Not activated: required PR checks.
-- Not implemented: registry publication, independent DEV/TEST/PROD and production gates.
+- Registry publication and attestation succeeded once; automatic DEV is a local draft.
+- Deferred build-once/deploy-many after the user simplified the POC scope.
+- Not implemented: Release Please, ZIP packaging, TEST/PROD deployments and QA gates.
 
 ## Next milestones, each requiring approval
 
 1. Completed: Docker packaging, reviewed bootstrap commit/push and successful main CI.
 2. Completed: title-only policy merged and actual PR metadata validation passed.
 3. Activate required PR checks after verifying real executions.
-4. Add immutable GHCR builds and independent local environments.
+4. Complete the simple main-to-DEV flow and verify it live.
 5. Implement on-demand Release Please and RCs without stabilization branches.
 6. Demonstrate QA fixes on main and mandatory TEST-to-PROD gates.
 7. Hotfixes, rollback, minimal migrations and the CTO demo.

@@ -1,0 +1,78 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      image-digest:
+        description: Image built by the current workflow run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dev:
+    name: Deploy DEV
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, trunk-lab-deploy]
+    timeout-minutes: 10
+    concurrency:
+      group: personal-trunk-lab-dev
+      cancel-in-progress: false
+    env:
+      LAB_IMAGE: ghcr.io/devansh-helfie/trunk-based-development-lab@${{ inputs.image-digest }}
+      IMAGE_DIGEST: ${{ inputs.image-digest }}
+      COMMIT_SHA: ${{ github.sha }}
+      BUILD_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Check out deployment configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use Docker Desktop and existing DEV settings
+        run: |
+          echo '/Applications/Docker.app/Contents/Resources/bin' >> "$GITHUB_PATH"
+          echo "DOCKER_HOST=unix://$HOME/.docker/run/docker.sock" >> "$GITHUB_ENV"
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/trunk-lab-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          echo "DEV_ENV_FILE=$HOME/.local/share/trunk-based-development-lab/environments/dev/.env" >> "$GITHUB_ENV"
+
+      - name: Sign in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether this main commit is still current
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$latest" == "$COMMIT_SHA" ]]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'deploy=false' >> "$GITHUB_OUTPUT"
+            echo 'Skipped DEV: a newer main commit exists.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Deploy DEV
+        if: steps.target.outputs.deploy == 'true'
+        run: |
+          test -f "$DEV_ENV_FILE" || { echo 'Run bash scripts/setup-dev.sh on the Mac first.'; exit 1; }
+          docker compose --project-name trunk-lab-dev --env-file "$DEV_ENV_FILE" \
+            --file compose.dev.yaml up --detach --no-build --pull always --wait --wait-timeout 90
+
+      - name: Check the running DEV version
+        if: steps.target.outputs.deploy == 'true'
+        run: |
+          curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3001/version |
+            jq -e --arg sha "$COMMIT_SHA" --arg digest "$IMAGE_DIGEST" \
+              '.environment == "DEV" and .commitSha == $sha and .imageDigest == $digest'
