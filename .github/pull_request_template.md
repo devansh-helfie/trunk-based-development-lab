@@ -1,6 +1,8 @@
 <!-- Set the PR title to a Conventional Commit title, for example:
 feat: ABC-123 show running release identity
-Select exactly one label: semver:major, semver:minor, semver:patch, semver:none.
+Classification comes from the title: feat = minor, fix = patch, ! = major.
+Approved non-releasing types such as docs and ci do not independently release.
+No semantic label is required.
 Replace the ticket placeholder with a real issue link. -->
 
 **Ticket:** <!-- [ABC-123](https://your-issue-url) -->

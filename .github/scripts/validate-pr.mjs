@@ -1,9 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-const SEMANTIC_LABELS = new Set([
-  'semver:major', 'semver:minor', 'semver:patch', 'semver:none'
-]);
 const NON_RELEASING_TYPES = new Set([
   'docs', 'chore', 'ci', 'build', 'test', 'style', 'refactor'
 ]);
@@ -15,10 +12,10 @@ function classificationFor(type, breaking) {
   if (type !== 'feat' && type !== 'fix' && !NON_RELEASING_TYPES.has(type)) {
     return undefined;
   }
-  if (breaking) return 'semver:major';
-  if (type === 'feat') return 'semver:minor';
-  if (type === 'fix') return 'semver:patch';
-  return 'semver:none';
+  if (breaking) return 'major';
+  if (type === 'feat') return 'minor';
+  if (type === 'fix') return 'patch';
+  return 'none';
 }
 
 function validateSections(body, errors) {
@@ -43,13 +40,6 @@ export function validatePullRequest(pr) {
   const errors = [];
   const title = pr.title ?? '';
   const body = (pr.body ?? '').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '');
-  const labels = (pr.labels ?? []).map((label) => typeof label === 'string' ? label : label.name);
-  const semanticLabels = labels.filter((label) => label?.startsWith('semver:'));
-
-  if (semanticLabels.length !== 1 || !SEMANTIC_LABELS.has(semanticLabels[0])) {
-    errors.push('Select exactly one valid semantic label: semver:major, semver:minor, semver:patch or semver:none.');
-  }
-
   // Ticket keys stay in the squash subject; PR text is never executed in a shell.
   const titleMatch = /^([a-z]+)(?:\([a-zA-Z0-9._/-]+\))?(!)?: ([A-Z][A-Z0-9]*-\d+) (\S.*)$/.exec(title);
   let classification;
@@ -60,8 +50,6 @@ export function validatePullRequest(pr) {
     classification = classificationFor(type, Boolean(breaking));
     if (!classification) {
       errors.push('Supported title types: feat, fix, docs, chore, ci, build, test, style and refactor.');
-    } else if (semanticLabels.length === 1 && semanticLabels[0] !== classification) {
-      errors.push(`The title requires ${classification}. Update the title or semantic label.`);
     }
 
     const ticketLine = /^\*\*Ticket:\*\*[ \t]*(.+)$/m.exec(body)?.[1] ?? '';

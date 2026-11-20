@@ -7,9 +7,10 @@ immutable artifacts and QA gates remain the focus.
 ## Current milestone
 
 The application, flag-management panel, local container and local test suites are
-implemented. The first CI workflow and PR policy are drafted and locally tested,
-but have not run on GitHub. There are no published images, real releases or
-deployment gates yet. Version `1.2.3` is the
+implemented. The first CI push run passed on GitHub for bootstrap commit
+`d624de8`. Its PR-policy job was skipped as expected on a push; actual PR metadata
+validation is pending the first PR. There are no published images, real releases
+or deployment gates yet. Version `1.2.3` is the
 learning baseline in package.json, not an existing published release.
 
 ## Start locally
@@ -192,24 +193,27 @@ Use `.github/pull_request_template.md`. The title and ticket link must use the
 same key. Populate User-Facing Changes, Technical Changes, Feature Flags and
 Risks, or write `None`. Template comments do not count as content.
 
-- `feat: ABC-123 show version` requires `semver:minor`.
-- `fix(api): ABC-123 correct pricing` requires `semver:patch`.
-- `feat!: ABC-123 change the API contract` requires `semver:major`.
-- `docs: ABC-123 update instructions` requires `semver:none`.
+The PR title alone declares the change category. No semantic label is required:
 
-Exactly one valid `semver:*` label is required. Non-releasing types are docs,
-chore, ci, build, test, style and refactor. Use `fix(deps)` for a releasing dependency
-fix. An exclamation mark on any supported type declares a breaking change.
-Conventional squash subjects will drive Release Please; labels only enforce
-consistency. This validator does not calculate release versions.
+- `feat: ABC-123 show version` declares a minor feature.
+- `fix(api): ABC-123 correct pricing` declares a patch fix.
+- `feat!: ABC-123 change the API contract` declares a major breaking change.
+- `docs: ABC-123 update instructions` declares no independent application release.
+
+Non-releasing types are docs, chore, ci, build, test, style and refactor. Use
+`fix(deps)` for a releasing dependency fix. An exclamation mark on any supported
+type declares a breaking change. CI validates titles and the PR body; it does not
+calculate release versions. Release Please will use the actual Conventional squash
+commits included in a release to calculate the highest applicable version bump.
 
 The ticket field accepts an HTTPS Markdown issue link with the title's key.
 Use an actual personal-lab issue. Only syntax and consistency are checked; the
 script does not fetch issues or access employer systems. Test references are synthetic.
-`semver:none` does not independently release, but can accompany other releasing
-changes. Release-target labels do not prove inclusion. Normal PR bodies cannot
-inject release-version or commit-message overrides. Generated release PR handling
-will be added with Release Please; an autorelease label alone exempts nothing.
+A non-releasing change can still be included with other releasing changes.
+Labels such as `release:1.3.0`, `qa-bug` and `release-blocker` remain optional
+tracking tools. No label overrides the title or proves code inclusion. Normal PR
+bodies cannot inject release-version or commit-message overrides. Generated release
+PR handling will be added with Release Please; an autorelease label exempts nothing.
 
 Run local policy tests with `npm run test:pr-policy`.
 
@@ -218,7 +222,7 @@ Run local policy tests with `npm run test:pr-policy`.
 Only `ci.yml` is added now. Its keys have these responsibilities:
 
 - `on.pull_request.branches` selects main; `types` reruns checks for new commits,
-  title/body edits and semantic-label addition/removal, including draft PRs.
+  title/body edits, including draft PRs. Label changes do not rerun CI.
 - `on.push.branches` tests main after merges and the reviewed bootstrap push.
 - `permissions.contents: read` keeps both jobs read-only.
 - `concurrency.group` separates PRs and branch pushes; `cancel-in-progress` cancels
@@ -236,9 +240,12 @@ Only `ci.yml` is added now. Its keys have these responsibilities:
   test policy scenarios and basic application behavior. Formal TEST QA stays separate.
 
 Base-script checkout does not make workflow edits trusted; branch protection and
-maintainer review remain necessary. Pending activation: reviewed bootstrap commit
-and push, four semantic labels, squash-only merging using the PR title, and required
-checks `PR policy` and `Application tests`. Independent approval needs a second
+maintainer review remain necessary. Squash-only merging is configured. Previously created semantic labels are
+unused by the new title-only policy. Squash subjects use the PR title with a blank body, and
+merged branches are automatically deleted. Required checks `PR policy` and `Application tests` remain pending the first
+real PR validation. The title-only change is local until reviewed, committed,
+pushed and merged. Because policy uses the base-branch validator, the migration
+PR may need the old semantic label once; subsequent PRs will not require it. Independent approval needs a second
 person. Local tests are not claimed as actual GitHub workflow executions.
 
 ## Release metadata and evidence
@@ -265,6 +272,28 @@ Release Please runs on demand. Its short-lived metadata PR is reviewed, merged
 and deleted before candidate building. No stabilization branch is planned;
 failed candidates are replaced through new main commits.
 
+## Planned release modes
+
+Both modes are agreed design, not implemented release workflows yet. The mode is
+selected when preparing the release, defaults to RC, and stays fixed for that release. A production
+dispatch must not switch modes to bypass candidate verification.
+
+- RC mode: prepare metadata, build the main commit once, tag an existing successful
+  artifact as `v1.3.0-rc.1`, deploy it to TEST and record QA sign-off. After
+  verification, create `v1.3.0` on that same commit and promote the same digest.
+  A fix produces a new main commit, new artifact and `v1.3.0-rc.2`.
+- Direct mode: prepare metadata, build once, create `v1.3.0`, deploy that tag's
+  artifact to TEST, then promote the exact same tag/commit/digest to PROD only
+  after verified QA. There is no RC tag requirement in this mode. Tag creation
+  does not mean QA passed. If QA fails and code changes, the published tag is
+  retained and the replacement uses a new version such as `v1.3.1`.
+
+Both modes use the same build and deployment workflows, mandatory TEST evidence,
+manual QA sign-off, configuration verification, release-blocker checks and production
+approval. Tags are never renamed, moved or overwritten. Tag creation never rebuilds
+the image. Release Please remains the on-demand version/changelog PR preparation
+tool. Stabilization release branches remain excluded.
+
 ## Learning log
 
 - Personal GitHub identity verified: devansh-helfie.
@@ -279,19 +308,23 @@ failed candidates are replaced through new main commits.
 - Refactored backend for readable routes, named validation steps and explicit flag operations.
 - Approved on-demand Release Please PR-only integration before RC builds.
 - Removed stabilization release branches from the plan; metadata PRs remain short-lived.
-- Planned production rule: stable and verified RC tags must resolve to the same commit and artifact.
+- Planned RC-mode production rule: stable and verified RC tags must resolve to the same commit and artifact.
+- Added planned direct mode: the same stable tag must be verified in TEST before PROD.
 - Docker image built once; one localhost-only LOCAL container verified on port 3010.
 - Container health, non-root execution, flag persistence and real QA pass/fail verified.
 - Normal mode restored after fault injection using the same image without rebuild.
 - First CI workflow and PR template drafted; policy scenarios verified locally.
-- Not activated: GitHub CI, semantic labels, squash settings and required checks.
+- Bootstrap commit d624de8 pushed after approval; CI run 44735331133 passed.
+- Configured squash-only merging, PR-title subjects and branch deletion.
+- Superseded mandatory semantic labels with title-only classification; local changes await review.
+- Not activated: real PR metadata validation and required PR checks.
 - Not implemented: registry publication, independent DEV/TEST/PROD and production gates.
 
 ## Next milestones, each requiring approval
 
-1. Review the completed local Docker packaging milestone.
-2. Review the bootstrap commit; commit and push only after explicit approvals.
-3. Activate drafted PR CI, semantic labels, squash settings and required checks.
+1. Completed: Docker packaging, reviewed bootstrap commit/push and successful main CI.
+2. Review and merge the title-only policy change, then demonstrate real PR validation.
+3. Activate required PR checks after verifying real executions.
 4. Add immutable GHCR builds and independent local environments.
 5. Implement on-demand Release Please and RCs without stabilization branches.
 6. Demonstrate QA fixes on main and mandatory TEST-to-PROD gates.
