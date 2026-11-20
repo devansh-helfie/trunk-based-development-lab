@@ -14,6 +14,7 @@ import { calculateQuote, isValidQuantity } from './pricing.js';
 export { booleanSetting, configuration } from './config.js';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
+const publicDirectory = fileURLToPath(new URL('../public/', import.meta.url));
 const panelDirectory = fileURLToPath(new URL('../public/flags/', import.meta.url));
 
 export function createApp(config = configuration()) {
@@ -30,11 +31,13 @@ export function createApp(config = configuration()) {
   app.use(setResponseHeaders);
 
   app.get('/', (_req, res) => {
-    res.json({
-      application: 'Release Lab: Order Quote API',
-      endpoints: ['GET /health', 'GET /version', 'GET /api/features', 'POST /api/quote', 'GET /flags'],
-      businessRule: 'Each item costs 1000 cents. Bulk discount gives 10% off at 5 or more items.'
-    });
+    res.sendFile('index.html', { root: publicDirectory });
+  });
+  app.get('/home.css', (_req, res) => {
+    res.sendFile('home.css', { root: publicDirectory });
+  });
+  app.get('/home.js', (_req, res) => {
+    res.sendFile('home.js', { root: publicDirectory });
   });
 
   app.get('/health', (_req, res) => {

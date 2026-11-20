@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Release Lab</title>
+  <link rel="stylesheet" href="/home.css">
+  <script src="/home.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">TRUNK-BASED DEVELOPMENT POC</p>
+      <h1>Release Lab</h1>
+      <p>Check the running version and try feature flags.</p>
+    </header>
+
+    <section aria-labelledby="version-heading">
+      <h2 id="version-heading">Running application</h2>
+      <p id="status" role="status">Loading version details...</p>
+      <dl>
+        <div><dt>Environment</dt><dd id="environment">Loading</dd></div>
+        <div><dt>Version</dt><dd id="version">Loading</dd></div>
+        <div><dt>Release / RC</dt><dd id="release">Loading</dd></div>
+        <div><dt>Commit</dt><dd id="commit">Loading</dd></div>
+        <div><dt>Build run</dt><dd id="build">Loading</dd></div>
+      </dl>
+    </section>
+
+    <nav aria-label="Demo tools">
+      <a class="button" href="/flags">Manage feature flags</a>
+      <a href="/health">Health</a>
+      <a href="/version">Version JSON</a>
+      <a href="/api/features">Feature JSON</a>
+    </nav>
+  </main>
+</body>
+</html>
