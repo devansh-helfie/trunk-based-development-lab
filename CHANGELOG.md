@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.1.0...v2.2.0) (2026-11-21)
+
+
+### Features
+
+* PLT-1652 add release history navigation ([#24](https://github.com/devansh-helfie/trunk-based-development-lab/issues/24)) ([0766792](https://github.com/devansh-helfie/trunk-based-development-lab/commit/07667923564f2758f60c863fd59ef92475757003))
+
 ## [2.1.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.0.1...v2.1.0) (2026-11-21)
 
 
