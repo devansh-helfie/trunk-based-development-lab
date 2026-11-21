@@ -398,6 +398,11 @@ and stable release identity. A stable tag alone does not authorize deployment.
 
 ## Future promotion milestones
 
+Next iteration: evaluate the latest relevant lower-environment run or attempt.
+A newer DEV failure must block TEST for that source, and a newer TEST deployment
+or QA failure must block PROD for that tag/source, even if older success evidence
+exists. Current gates check successful DEV history and available QA evidence.
+
 Rollback UI, ZIP deployment and same-digest artifact reuse remain future work.
 Earlier designs are retained in `.backups/`.
 
