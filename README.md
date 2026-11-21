@@ -320,117 +320,59 @@ The fault switch is local teaching scaffolding. Turning it off is not a source
 fix, a QA approval or permission to deploy. The later QA-fix milestone will
 demonstrate a real code change on main, a new artifact and revalidation.
 
-### Release preparation and TEST
+### Release preparation, tag creation and TEST
 
-Preparation and deployment have separate manually dispatched workflows. Run
-both from branch main. They share a concurrency group so lifecycle changes do
-not run simultaneously.
+DEV automatically builds and deploys each main merge. TEST independently selects
+an existing tag. Creating or deploying a historical tag does not reset main/DEV.
+All manual workflows execute their trusted configuration from branch main.
 
-1. Actions > Prepare Release > Run workflow (`prepare.yml`) creates or updates
-   the version/changelog PR. New PRs are ready for review rather than drafts.
-   Review the PR, let normal CI pass, then merge with squash. Preparation
-   publishes no tags and deploys no environment.
-2. Merging that PR updates package.json, the lockfile, release manifest and
-   changelog. Its exact merge commit automatically builds and deploys DEV.
-3. After that DEV run succeeds, open Actions > Release > Run workflow
-   (`release.yml`) and select `operation: test`. `source-ref` accepts
-   a release commit SHA, tag or main-relative pointer. Blank selects the latest
-   version PR merge commit from main history. The workflow finds its merged
-   Release Please PR automatically; there is no PR-number input. Explicit
-   pointers must select a merged release metadata commit, not an app-only PR.
-   Automatic selection uses the configured `chore: PLT-1652 release` squash
-   subject, then verifies the actual merged PR through the GitHub API.
-4. For a new tag select `tag-mode: rc` with a positive `rc-number`, or `stable`.
-   An existing tag supplied in `source-ref` is preserved exactly and determines
-   its own stable/RC mode; tag-mode and rc-number are ignored. The workflow
-   validates the release PR targets main, came from a Release Please branch,
-   is merged, and has matching package/manifest versions and PR version title.
-   It also requires that exact commit to belong to main and have a successful
-   Build/DEV pipeline. It never takes the version from an unmerged draft.
-5. The tag is created on that verified metadata commit. Version 2.0.0 becomes
-   `v2.0.0-rc.1` or `v2.0.0`. A tag on the same commit is reusable; a tag on a
-   different commit fails with an explicit error and is never moved.
-6. Build and Deploy run directly for TEST, then QA checks live pricing, flags,
-   commit, release identity and package version. Deployment is called directly
-   rather than relying on another tag-triggered workflow. PROD is not deployed.
+1. **Prepare Release** (`prepare.yml`) lets Release Please calculate the next
+   version and create a normal version/changelog PR. Review, pass CI and merge.
+2. **Create Release Tag** (`create-tag.yml`) accepts `source-ref`: blank selects
+   the dispatch commit on main; a SHA, tag or `main~1` can select an older main
+   commit. That exact source must belong to main and have a successful DEV run.
+   Select rc/stable and, for RC, a positive sequence number.
+3. The publication workflow reads the approved version from the latest merged
+   Release Please metadata, independently of the selected application source.
+   It creates or reuses an immutable tag and GitHub Release on that source.
+   Stable publication advances the metadata PR lifecycle to autorelease: tagged;
+   RC publication leaves the release pending. No version is typed manually.
+4. **Deploy TEST** (`release.yml`) has exactly one input, `release-tag`. It only
+   resolves an existing version tag, requires main ancestry and successful DEV,
+   rebuilds/deploys that frozen source and runs live QA. It never creates tags,
+   changes release versions or edits lifecycle labels. Manually created Git tags
+   can also be deployed if they pass these checks; a GitHub Release is optional.
 
-Release Please owns version calculation, the metadata PR, stable tag, stable
-GitHub Release, release notes and lifecycle labels. Stable publication calls the
-native action with `skip-github-pull-request: true`; no custom step creates a
-stable tag or edits autorelease labels. Native publication is restricted to the
-latest merged metadata commit and exactly one selected merged pending release,
-so another pending release cannot be published before its validation.
+Release Please owns version calculation and the metadata PR. Publication is
+custom because native Release Please publishes its version PR merge commit,
+whereas this POC explicitly allows any previously DEV-verified main source.
+Source package version and assigned release version may differ for historical
+source selections. The UI displays package version separately from release/RC.
+QA checks the package version from the selected source, not from current main.
+Release notes identify source SHA, source package version and metadata SHA;
+they do not copy the newer version PR's changelog as claims about older code.
 
-RC tags are supplementary identities derived from that approved base version.
-Only the RC path uses explicit tag/prerelease creation. RC publication leaves
-the version PR pending until its stable version is published through Release
-Please. Native stable releases use Release Please defaults, including its latest
-release behavior; a GitHub latest designation is not QA or PROD approval.
-Published tags alone never authorize PROD.
+Existing tags on a different SHA fail and are never moved. Repeating a successful
+publication on the same SHA reuses it. A failed QA leaves the selected source in
+TEST and does not mark it approved for PROD. Stable release publication alone
+is not QA approval. Tags already published by the earlier native flow remain
+usable. Rollback UI and PROD promotion are deferred; Deploy TEST can explicitly
+retest an older existing tag.
 
-Existing published stable/RC releases are reused after verifying the exact SHA,
-version and release type. Annotated tags are resolved to their commit too.
-A manual stable tag may be supplied if it matches the metadata version and SHA;
-Release Please still owns creation of its GitHub Release and lifecycle labels.
-Do not manually publish a GitHub Release for a pending release PR: reuse does
-not adopt externally published releases into Release Please lifecycle tracking.
-Legacy versions remain available through rollback.
+### Setup and limits
 
-Application PRs are separate from the version PR: multiple application PRs can
-be grouped into one release. PR policy only runs on pull-request events. Main
-pushes and manually dispatched release runs still run application tests, but
-skip PR title/body validation because they do not represent a PR event.
-
-### TEST rollback
-
-In Actions > Release, select `operation: rollback` and provide an existing published version tag in
-`source-ref`, such as `v1.3.0-rc.1`. Raw SHAs, branch pointers, blank inputs,
-unknown tags and draft releases are rejected for rollback. `tag-mode` and
-`rc-number` are ignored. The tag must resolve to main history
-and have a successful DEV pipeline. Existing tags and releases stay unchanged.
-
-Rollback bypasses Release Please and publication, rebuilds the selected source,
-deploys TEST and runs fresh QA. It restores neither the identical earlier image
-nor persisted data or flag settings. The current TEST `QA_DEMO` and saved flags
-still apply. Failed QA leaves the selected deployment in TEST; there is no
-automatic recovery deployment. Legacy tags created before metadata-first
-releasing may have a different package version, so rollback verifies the source
-and tag identity without inventing a matching package version.
-
-Deployment configuration comes from the trusted dispatch commit; Build and QA
-use the selected application source. Older applications must support the QA
-contract. Historical new release candidates require their merged version PR;
-use rollback to restore an already published application version.
-
-### Setup and current limits
-
-- Allow GitHub Actions to create PRs in the repository's Actions settings.
-- Preparation and publication use the repository Actions secret RELEASE_TOKEN
-  when configured, otherwise GITHUB_TOKEN. A PAT-created version PR can start CI
-  without GitHub's workflow-approval prompt. GITHUB_TOKEN-created PRs can place
-  CI in an approval-required state. This is separate from human PR review;
-  changing the token does not approve or merge a PR. GitHub can reject creation of a
-  historical tag with HTTP 403 when additional Workflows write permission is
-  required. For unattended historical publication, optionally configure the
-  repository Actions secret `RELEASE_TOKEN` using a fine-grained token limited to
-  this personal repository with Contents, Workflows and Pull requests write access.
-  It is used by preparation and publication; build/deploy keep GITHUB_TOKEN.
-  No additional release token is required for tag reuse.
-  Alternatively, create the exact tag with your existing authorized personal
-  CLI login, then rerun the failed jobs. The workflow always verifies its SHA.
-  No credential is created or stored by this workflow change.
-- Run `bash scripts/setup-env.sh TEST` on the personal Mac. Each environment
-  has separate private settings, flag volume and port. New TEST settings seed
-  bulkDiscount on. Configure existing TEST flags explicitly if needed.
-- Set `QA_DEMO=pass` or `fail` under Settings > Environments > TEST > Variables.
-  Missing defaults to pass; other values fail deployment. Changing it requires
-  redeployment. QA expectations never change to match the app's answer.
-- DEV remains automatic on main and keeps fault injection off. Standard main
-  builds retain attestation; manual TEST rebuilds and artifact reuse are deferred.
-
-PROD promotion and rollback are not implemented. Future PROD delivery must use
-stable version tags only and require QA approval for the exact TEST-verified
-commit. Rebuilding remains deliberate for this POC.
+- RELEASE_TOKEN is used for preparation/publication when present, with
+  GITHUB_TOKEN fallback. Historical tag creation can require Contents and
+  Workflows write permissions; lifecycle updates require PR/Issues write.
+  Keep the credential limited to this personal repository. Build and deployment
+  continue using GITHUB_TOKEN. No credential is created by these workflows.
+- Set TEST environment variable QA_DEMO to pass or fail, then redeploy TEST.
+  Missing defaults to pass. Invalid values fail deployment. Saved TEST flags
+  remain independent of QA assertions. DEV always keeps fault injection off.
+- Run scripts/setup-env.sh TEST once on the Mac; existing private settings are
+  preserved. Separate Compose projects keep DEV and TEST ports and data apart.
+- Build-once/deploy-many, ZIP support, human QA sign-off and PROD gates remain
+  later milestones. The current POC deliberately rebuilds the selected source.
 
 ## Future promotion milestones
 

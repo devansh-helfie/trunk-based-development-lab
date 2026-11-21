@@ -1,26 +1,12 @@
-name: Release
+name: Deploy TEST
 
 on:
   workflow_dispatch:
     inputs:
-      operation:
-        description: Deploy a release to TEST or roll back TEST
-        type: choice
-        options: [test, rollback]
-        default: test
-      source-ref:
-        description: Release commit SHA, tag or main~1; blank selects latest merged release; rollback requires a tag
+      release-tag:
+        description: Existing tag to deploy, for example v2.1.0-rc.1 or v2.1.0
         type: string
-        default: ''
-      tag-mode:
-        description: New TEST tag format; ignored when source-ref is an existing tag
-        type: choice
-        options: [rc, stable]
-        default: rc
-      rc-number:
-        description: RC sequence, used only by test in RC mode
-        type: string
-        default: '1'
+        required: true
 
 permissions:
   contents: read
@@ -30,28 +16,24 @@ defaults:
     shell: bash
 
 concurrency:
-  group: release-main
+  group: test-deployment
   cancel-in-progress: false
 
 jobs:
-  verify-dev:
-    name: Validate the release source and DEV result
-    if: github.ref == 'refs/heads/main' && (inputs.operation == 'test' || inputs.operation == 'rollback')
+  validate:
+    name: Resolve the existing tag and verify DEV
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
-      pull-requests: read
       actions: read
     outputs:
       sha: ${{ steps.source.outputs.sha }}
-      tag: ${{ steps.identity.outputs.tag }}
-      version: ${{ steps.metadata.outputs.version }}
-      pr: ${{ steps.metadata-pr.outputs.number }}
-      mode: ${{ steps.identity.outputs.mode }}
-      latest: ${{ steps.source.outputs.latest }}
+      package-version: ${{ steps.source.outputs.package-version }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.release-tag }}
     steps:
       - name: Check out trusted main history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,208 +42,27 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require a published version tag for rollback
-        if: inputs.operation == 'rollback'
-        env:
-          RELEASE_TAG: ${{ inputs.source-ref }}
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Rollback requires an existing tag such as v2.0.0 or v2.0.0-rc.1.'; exit 1; }
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft == false' | grep -qx true
-
-      - name: Resolve the source and require main ancestry
+      - name: Resolve the tag to its main commit
         id: source
-        env:
-          SOURCE_REF: ${{ inputs.source-ref }}
-          OPERATION: ${{ inputs.operation }}
         run: |
-          git branch --force main "$GITHUB_SHA"
-          latest=$(git log "$GITHUB_SHA" -1 --format=%H --grep='^chore: PLT-1652 release [0-9]')
-          echo "latest=$latest" >> "$GITHUB_OUTPUT"
-          if [[ -z "$SOURCE_REF" ]]; then
-            SOURCE_REF="$latest"
-            [[ -n "$SOURCE_REF" ]] || { echo 'Merge a Release Please version PR before running TEST.'; exit 1; }
-          else
-            tag="${SOURCE_REF#refs/tags/}"
-            if git show-ref --verify --quiet "refs/tags/$tag"; then
-              [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Select a version tag such as v2.0.0 or v2.0.0-rc.1.'; exit 1; }
-              echo "tag=$tag" >> "$GITHUB_OUTPUT"
-              SOURCE_REF="refs/tags/$tag"
-            elif [[ "$OPERATION" == 'rollback' ]]; then
-              echo 'The rollback tag does not exist.'
-              exit 1
-            fi
-          fi
-          sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
-          git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo 'Select a commit from main history.'; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Enter an existing version tag.'; exit 1; }
+          sha=$(git rev-parse --verify --end-of-options "refs/tags/$RELEASE_TAG^{commit}")
+          git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo 'The tag must point to main history.'; exit 1; }
+          git show "$sha:package.json" > source-package.json
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "package-version=$(jq -er '.version' source-package.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Find the merged release PR for the selected commit
-        if: inputs.operation == 'test'
-        id: metadata-pr
+      - name: Require that exact source to have passed DEV
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls" > source-prs.json
-          pr=$(jq -er --arg sha "$SOURCE_SHA" '[.[] | select(.merged_at != null and
-            .merge_commit_sha == $sha and .base.ref == "main" and
-            (.head.ref | startswith("release-please--")))] |
-            if length == 1 then .[0].number else error("Select a merged Release Please commit, or use rollback for an existing release tag.") end' source-prs.json)
-          gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" > release-pr.json
-          jq -e --arg sha "$SOURCE_SHA" '.merged == true and .merge_commit_sha == $sha and
-            .head.repo.full_name == .base.repo.full_name' release-pr.json
-          echo "number=$pr" >> "$GITHUB_OUTPUT"
-
-      - name: Require matching package and release manifest versions
-        if: inputs.operation == 'test'
-        id: metadata
-        env:
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: |
-          git show "$SOURCE_SHA:.release-please-manifest.json" > release-manifest.json
-          git show "$SOURCE_SHA:package.json" > release-package.json
-          version=$(jq -er '.["."] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' release-manifest.json)
-          jq -e --arg version "$version" '.version == $version' release-package.json
-          jq -e --arg title "chore: PLT-1652 release $version" '.title == $title' release-pr.json
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Require the selected commit to have passed DEV
-        env:
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: |
-          if ! gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
             -f head_sha="$SOURCE_SHA" -f event=push -f status=success -f per_page=1 \
-            --jq '.total_count > 0' | grep -qx true; then
-            echo "::error::No successful DEV pipeline found for $SOURCE_SHA. Wait for its Build run to pass, then retry."
-            exit 1
-          fi
-
-      - name: Validate a new RC sequence
-        if: inputs.operation == 'test' && steps.source.outputs.tag == '' && inputs.tag-mode == 'rc'
-        env:
-          RC_NUMBER: ${{ inputs.rc-number }}
-        run: '[[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]]'
-
-      - name: Select the TEST release identity
-        id: identity
-        env:
-          OPERATION: ${{ inputs.operation }}
-          SOURCE_TAG: ${{ steps.source.outputs.tag }}
-          VERSION: ${{ steps.metadata.outputs.version }}
-          TAG_MODE: ${{ inputs.tag-mode }}
-          RC_NUMBER: ${{ inputs.rc-number }}
-        run: |
-          tag="$SOURCE_TAG"
-          if [[ "$OPERATION" == 'test' && -n "$tag" ]]; then
-            if [[ "$tag" != "v$VERSION" && "$tag" != "v$VERSION-rc."* ]]; then
-              echo 'The supplied tag version must match the merged package version.'
-              exit 1
-            fi
-          elif [[ -z "$tag" ]]; then
-            tag="v$VERSION"
-            if [[ "$TAG_MODE" == 'rc' ]]; then
-              tag="$tag-rc.$RC_NUMBER"
-            fi
-          fi
-          mode=stable
-          [[ "$tag" == *-rc.* ]] && mode=rc
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "mode=$mode" >> "$GITHUB_OUTPUT"
-
-  release:
-    name: Publish through Release Please or reuse the release
-    needs: verify-dev
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-    outputs:
-      tag: ${{ needs.verify-dev.outputs.tag }}
-      sha: ${{ needs.verify-dev.outputs.sha }}
-      version: ${{ needs.verify-dev.outputs.version }}
-    env:
-      GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-      SOURCE_SHA: ${{ needs.verify-dev.outputs.sha }}
-      RELEASE_TAG: ${{ needs.verify-dev.outputs.tag }}
-      RELEASE_MODE: ${{ needs.verify-dev.outputs.mode }}
-    steps:
-      - name: Check existing tag and release without changing them
-        id: existing
-        run: |
-          tag_exists=false
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > tag.json 2> tag-error.log; then
-            tag_exists=true
-            actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')
-            [[ "$actual_sha" == "$SOURCE_SHA" ]] || { echo "::error::$RELEASE_TAG points to another commit. Existing tags are never moved."; exit 1; }
-          elif ! grep -q 'HTTP 404' tag-error.log; then
-            cat tag-error.log >&2
-            exit 1
-          fi
-          published=false
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > release.json 2> release-error.log; then
-            [[ "$tag_exists" == true ]] || { echo 'The release tag is missing; restore it before deployment.'; exit 1; }
-            jq -e --arg mode "$RELEASE_MODE" '.draft == false and .prerelease == ($mode == "rc")' release.json
-            published=true
-          elif ! grep -q 'HTTP 404' release-error.log; then
-            cat release-error.log >&2
-            exit 1
-          fi
-          echo "tag-exists=$tag_exists" >> "$GITHUB_OUTPUT"
-          echo "published=$published" >> "$GITHUB_OUTPUT"
-
-      - name: Require a single selected pending release before native publication
-        if: inputs.operation == 'test' && needs.verify-dev.outputs.mode == 'stable' && steps.existing.outputs.published != 'true'
-        env:
-          LATEST_RELEASE_SHA: ${{ needs.verify-dev.outputs.latest }}
-          RELEASE_PR: ${{ needs.verify-dev.outputs.pr }}
-        run: |
-          [[ "$SOURCE_SHA" == "$LATEST_RELEASE_SHA" ]] || { echo 'New stable publication must select the latest merged release. Reuse an existing tag for older releases.'; exit 1; }
-          gh api --paginate --slurp --method GET "repos/$GITHUB_REPOSITORY/issues" \
-            -f state=closed -f labels='autorelease: pending' -f per_page=100 > pending-prs.json
-          jq -e --argjson pr "$RELEASE_PR" '[.[][] | select(.pull_request != null) | .number] == [$pr]' pending-prs.json
-
-      - name: Publish the stable version with Release Please
-        if: inputs.operation == 'test' && needs.verify-dev.outputs.mode == 'stable' && steps.existing.outputs.published != 'true'
-        id: stable
-        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        with:
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          target-branch: main
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-          skip-github-pull-request: true
-
-      - name: Create only the supplementary RC tag
-        if: inputs.operation == 'test' && needs.verify-dev.outputs.mode == 'rc' && steps.existing.outputs.tag-exists != 'true'
-        run: |
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f ref="refs/tags/$RELEASE_TAG" -f sha="$SOURCE_SHA"
-
-      - name: Publish only the RC prerelease
-        if: inputs.operation == 'test' && needs.verify-dev.outputs.mode == 'rc' && steps.existing.outputs.published != 'true'
-        run: |
-          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "$RELEASE_TAG" --generate-notes --latest=false --prerelease
-
-      - name: Verify the final published release identity
-        env:
-          NATIVE_TAG: ${{ steps.stable.outputs.tag_name }}
-          NATIVE_SHA: ${{ steps.stable.outputs.sha }}
-        run: |
-          if [[ -n "$NATIVE_TAG" ]]; then
-            [[ "$NATIVE_TAG" == "$RELEASE_TAG" && "$NATIVE_SHA" == "$SOURCE_SHA" ]] || { echo 'Release Please returned a different tag or commit.'; exit 1; }
-          fi
-          actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')
-          [[ "$actual_sha" == "$SOURCE_SHA" ]] || { echo 'Published tag commit does not match the verified release.'; exit 1; }
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq '{draft, prerelease}' > published-release.json
-          jq -e --arg mode "$RELEASE_MODE" '.draft == false and .prerelease == ($mode == "rc")' published-release.json
-          echo "TEST target: $RELEASE_TAG at $SOURCE_SHA. Stable publication and lifecycle labels belong to Release Please." >> "$GITHUB_STEP_SUMMARY"
+            --jq '.total_count > 0' | grep -qx true
 
   test:
     name: Build and deploy TEST
-    needs: release
+    needs: validate
     permissions:
       contents: read
       packages: write
@@ -269,13 +70,13 @@ jobs:
       attestations: write
     uses: ./.github/workflows/build.yml
     with:
-      source-ref: ${{ needs.release.outputs.sha }}
+      source-ref: ${{ needs.validate.outputs.sha }}
       environment: TEST
-      release-tag: ${{ needs.release.outputs.tag }}
+      release-tag: ${{ inputs.release-tag }}
 
   qa:
     name: Run QA against TEST
-    needs: [release, test]
+    needs: [validate, test]
     runs-on: [self-hosted, macOS, ARM64, trunk-lab-deploy]
     timeout-minutes: 10
     outputs:
@@ -283,14 +84,14 @@ jobs:
     env:
       BASE_URL: http://127.0.0.1:3002
       QA_EXPECT_BULK_DISCOUNT: 'true'
-      RELEASE_SHA: ${{ needs.release.outputs.sha }}
-      RELEASE_TAG: ${{ needs.release.outputs.tag }}
-      RELEASE_VERSION: ${{ needs.release.outputs.version }}
+      RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+      RELEASE_TAG: ${{ inputs.release-tag }}
+      RELEASE_VERSION: ${{ needs.validate.outputs.package-version }}
     steps:
       - name: Check out the release QA checks
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release.outputs.sha }}
+          ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
 
       - name: Use Node.js 24
@@ -317,7 +118,6 @@ jobs:
       - name: Summarize the TEST result
         env:
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          OPERATION: ${{ inputs.operation }}
         run: |
-          echo "TEST $OPERATION QA passed for $RELEASE_SHA ($RELEASE_TAG)." >> "$GITHUB_STEP_SUMMARY"
+          echo "TEST QA passed for $RELEASE_SHA ($RELEASE_TAG)." >> "$GITHUB_STEP_SUMMARY"
           echo "Evidence: $GH_RUN_URL. No PROD deployment was created." >> "$GITHUB_STEP_SUMMARY"
