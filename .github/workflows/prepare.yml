@@ -38,5 +38,5 @@ jobs:
       - name: Explain the next step
         run: |
           echo 'Review the Release Please PR, pass its CI checks and merge it.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'After its merge commit passes DEV, run test with source-ref blank or set to its merge commit. No tag or TEST deployment was created by prepare.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'After merging, run Create Release Tag with the desired source-ref, then Deploy TEST with its tag. Preparation creates no tag or deployment.' >> "$GITHUB_STEP_SUMMARY"
 
