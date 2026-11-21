@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   prepare:
-    name: Prepare the version PR only
+    name: Prepare or resume the release
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -44,6 +44,8 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+    outputs:
+      pending-sha: ${{ steps.selection.outputs.pending-sha }}
     env:
       GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
       SOURCE_REF: ${{ inputs.source-ref }}
@@ -81,23 +83,43 @@ jobs:
           manifest-file: .release-please-manifest.json
           skip-github-release: true
 
-      - name: Attach the selection to the release PR
+      - name: Attach the selection to the new or pending release PR
+        id: selection
         env:
           RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
-          [[ -n "$RELEASE_PR" ]] || { echo 'No release PR was returned. Check for an unpublished merged release or no releasable changes.'; exit 1; }
-          pr=$(jq -er '.number' <<< "$RELEASE_PR")
+          if [[ -n "$RELEASE_PR" ]]; then
+            pr=$(jq -er '.number' <<< "$RELEASE_PR")
+          else
+            version=$(jq -er '.["."]' .release-please-manifest.json)
+            gh pr list --repo "$GITHUB_REPOSITORY" --state merged --base main \
+              --label 'autorelease: pending' --json number,title,headRefName,mergeCommit > pending-prs.json
+            jq -e --arg title "chore: PLT-1652 release $version" '[.[] |
+              select(.title == $title and (.headRefName | startswith("release-please--")))] |
+              if length == 1 then .[0] else error("No single pending release found; there may be no releasable changes") end' \
+              pending-prs.json > pending-release.json
+            pr=$(jq -r '.number' pending-release.json)
+            echo "pending-sha=$(jq -r '.mergeCommit.oid' pending-release.json)" >> "$GITHUB_OUTPUT"
+            echo "Resuming already merged release PR #$pr. The selected source must pass DEV before publication." >> "$GITHUB_STEP_SUMMARY"
+          fi
           gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body-file release-selection.json
-          echo "Review and merge release PR #$pr. Its successful DEV run will create the tag automatically." >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "$RELEASE_PR" ]]; then
+            echo "Review and merge release PR #$pr. Its successful DEV run will create the tag automatically." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   publish:
     name: Publish the approved version on the selected source
+    needs: prepare
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      startsWith(github.event.workflow_run.head_commit.message, 'chore: PLT-1652 release ')
+      always() && (
+        (github.event_name == 'workflow_dispatch' && needs.prepare.result == 'success' &&
+         needs.prepare.outputs.pending-sha != '') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.head_repository.full_name == github.repository &&
+         startsWith(github.event.workflow_run.head_commit.message, 'chore: PLT-1652 release '))
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -107,12 +129,12 @@ jobs:
       actions: read
     env:
       GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-      MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
+      MAIN_SHA: ${{ github.event.workflow_run.head_sha || needs.prepare.outputs.pending-sha }}
     steps:
       - name: Check out trusted main history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ env.MAIN_SHA }}
           fetch-depth: 0
           persist-credentials: false
 
