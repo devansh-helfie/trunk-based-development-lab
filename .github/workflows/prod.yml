@@ -1,0 +1,120 @@
+name: Promote to PROD
+
+on:
+  workflow_dispatch:
+    inputs:
+      tested-tag:
+        description: TEST-approved tag, for example v2.3.0-rc.1 or v2.3.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: prod-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Verify TEST and publish the stable tag
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tag: ${{ steps.source.outputs.tag }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TESTED_TAG: ${{ inputs.tested-tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve the tested tag and stable version
+        id: source
+        run: |
+          tag=$(jq -rn --arg value "$TESTED_TAG" '$value | gsub("^\\s+|\\s+$"; "")')
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Enter a version tag tested in TEST.'; exit 1; }
+          sha=$(git rev-parse --verify --end-of-options "refs/tags/$tag^{commit}")
+          git merge-base --is-ancestor "$sha" "$GITHUB_SHA"
+          echo "TESTED_TAG=$tag" >> "$GITHUB_ENV"
+          echo "SOURCE_SHA=$sha" >> "$GITHUB_ENV"
+          echo "STABLE_TAG=${tag%-rc.*}" >> "$GITHUB_ENV"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag%-rc.*}" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful TEST QA for this exact tag and commit
+        run: |
+          run=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f name="test-qa-$TESTED_TAG" \
+            --jq '.artifacts | map(select(.expired == false)) | first | .workflow_run.id // empty')
+          [[ "$run" =~ ^[0-9]+$ ]] || { echo 'No QA evidence found. Run Deploy TEST with this tag first.'; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" | jq -e \
+            '.path == ".github/workflows/release.yml" and .event == "workflow_dispatch" and
+            .head_branch == "main" and .status == "completed" and .conclusion == "success"'
+          gh run download "$run" --name "test-qa-$TESTED_TAG" --dir test-evidence
+          jq -e --arg tag "$TESTED_TAG" --arg sha "$SOURCE_SHA" --arg run "$run" \
+            '.environment == "TEST" and .releaseIdentity == $tag and .commitSha == $sha and .qaRunId == $run' \
+            test-evidence/qa-verification.json
+          echo "QA_RUN=$run" >> "$GITHUB_ENV"
+
+      - name: Find the approved Release Please version PR
+        run: |
+          version=${STABLE_TAG#v}
+          pr=$(gh pr list --state merged --base main --search "chore: PLT-1652 release $version in:title" \
+            --json number,title,headRefName | jq -r --arg title "chore: PLT-1652 release $version" \
+              '.[] | select(.title == $title and (.headRefName | startswith("release-please--"))) | .number')
+          [[ "$pr" =~ ^[0-9]+$ ]] || { echo 'No unique merged Release Please version PR found.'; exit 1; }
+          echo "RELEASE_PR=$pr" >> "$GITHUB_ENV"
+
+      - name: Create or reuse the stable tag on the TEST-approved commit
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          if git show-ref --verify --quiet "refs/tags/$STABLE_TAG"; then
+            sha=$(git rev-parse "refs/tags/$STABLE_TAG^{commit}")
+            [[ "$sha" == "$SOURCE_SHA" ]] || { echo 'Stable tag points to another commit. Tags are never moved.'; exit 1; }
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$STABLE_TAG" -f sha="$SOURCE_SHA"
+          fi
+
+      - name: Publish or reuse the stable GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          release=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq -c --arg tag "$STABLE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty')
+          if [[ -n "$release" ]]; then
+            jq -e '.draft == false and .prerelease == false' <<< "$release"
+          else
+            gh release create "$STABLE_TAG" --verify-tag --title "$STABLE_TAG" --latest=false \
+              --notes "Promoted from $TESTED_TAG at $SOURCE_SHA. TEST QA: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$QA_RUN"
+          fi
+          gh pr edit "$RELEASE_PR" --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
+          echo "$STABLE_TAG at $SOURCE_SHA is verified. PROD deployment requires environment approval." >> "$GITHUB_STEP_SUMMARY"
+
+  prod:
+    name: Build and deploy PROD with approval
+    needs: promote
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/build.yml
+    with:
+      source-ref: ${{ needs.promote.outputs.sha }}
+      environment: PROD
+      release-tag: ${{ needs.promote.outputs.tag }}

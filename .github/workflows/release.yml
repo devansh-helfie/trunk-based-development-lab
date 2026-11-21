@@ -110,6 +110,16 @@ jobs:
           curl --fail --silent --show-error "$BASE_URL/version" > qa-version.json
           jq -e --arg sha "$RELEASE_SHA" --arg tag "$RELEASE_TAG" --arg version "$RELEASE_VERSION" \
             '.environment == "TEST" and .commitSha == $sha and .releaseIdentity == $tag and .version == $version' qa-version.json
+          jq --arg run "$GITHUB_RUN_ID" '. + {qaRunId: $run}' qa-version.json > qa-verification.json
           configuration=$(jq -r '.configurationId' qa-version.json)
           echo "TEST QA passed for $RELEASE_TAG at $RELEASE_SHA. Configuration: $configuration." >> "$GITHUB_STEP_SUMMARY"
           echo "Evidence: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save successful TEST verification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-qa-${{ needs.validate.outputs.tag }}
+          path: qa-verification.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
