@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release-tag:
-        description: Existing tag to deploy, for example v2.1.0-rc.1 or v2.1.0
+        description: Existing tag to deploy, for example v2.2.0-rc.1 or v2.2.0
         type: string
         required: true
 
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Resolve the existing tag and verify DEV
+    name: Validate tag and DEV result
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -30,39 +30,38 @@ jobs:
       actions: read
     outputs:
       sha: ${{ steps.source.outputs.sha }}
-      package-version: ${{ steps.source.outputs.package-version }}
-      release-tag: ${{ steps.source.outputs.release-tag }}
+      version: ${{ steps.source.outputs.version }}
+      tag: ${{ steps.source.outputs.tag }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_TAG: ${{ inputs.release-tag }}
     steps:
-      - name: Check out trusted main history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Resolve the tag to its main commit
+      - name: Trim and resolve the release tag
         id: source
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
         run: |
-          # Remove surrounding whitespace while preserving invalid spaces inside a tag.
-          RELEASE_TAG="$(printf '%s' "$RELEASE_TAG" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Enter an existing version tag.'; exit 1; }
-          sha=$(git rev-parse --verify --end-of-options "refs/tags/$RELEASE_TAG^{commit}")
-          git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo 'The tag must point to main history.'; exit 1; }
-          git show "$sha:package.json" > source-package.json
+          tag=$(jq -rn --arg value "$RELEASE_TAG" '$value | gsub("^\\s+|\\s+$"; "")')
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Enter an existing version tag.'; exit 1; }
+          sha=$(git rev-parse --verify --end-of-options "refs/tags/$tag^{commit}")
+          git merge-base --is-ancestor "$sha" "$GITHUB_SHA"
+          version=$(git show "$sha:package.json" | jq -er '.version')
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "release-tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "package-version=$(jq -er '.version' source-package.json)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Require that exact source to have passed DEV
+      - name: Require a successful DEV run for that source
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
-          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
-            -f head_sha="$SOURCE_SHA" -f event=push -f status=success -f per_page=1 \
-            --jq '.total_count > 0' | grep -qx true
+          run=$(gh run list --workflow build.yml --commit "$SOURCE_SHA" --event push --status success \
+            --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [[ -n "$run" ]] || { echo 'The tagged commit has not passed DEV.'; exit 1; }
 
   test:
     name: Build and deploy TEST
@@ -76,52 +75,41 @@ jobs:
     with:
       source-ref: ${{ needs.validate.outputs.sha }}
       environment: TEST
-      release-tag: ${{ needs.validate.outputs.release-tag }}
+      release-tag: ${{ needs.validate.outputs.tag }}
 
   qa:
     name: Run QA against TEST
     needs: [validate, test]
     runs-on: [self-hosted, macOS, ARM64, trunk-lab-deploy]
     timeout-minutes: 10
-    outputs:
-      configuration: ${{ steps.target.outputs.configuration }}
     env:
       BASE_URL: http://127.0.0.1:3002
       QA_EXPECT_BULK_DISCOUNT: 'true'
       RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      RELEASE_TAG: ${{ needs.validate.outputs.release-tag }}
-      RELEASE_VERSION: ${{ needs.validate.outputs.package-version }}
+      RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
     steps:
-      - name: Check out the release QA checks
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
 
-      - name: Use Node.js 24
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           package-manager-cache: false
 
-      - name: Install the locked QA dependencies
+      - name: Install QA dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Run the real pricing and configuration checks
+      - name: Run pricing and configuration checks
         run: npm run test:qa
 
-      - name: Record the verified TEST configuration
-        id: target
+      - name: Verify the deployed release and record QA evidence
         run: |
-          curl --fail --silent --show-error "$BASE_URL/version" > qa-target.json
+          curl --fail --silent --show-error "$BASE_URL/version" > qa-version.json
           jq -e --arg sha "$RELEASE_SHA" --arg tag "$RELEASE_TAG" --arg version "$RELEASE_VERSION" \
-            '.environment == "TEST" and .commitSha == $sha and .releaseIdentity == $tag and
-             ($version == "" or .version == $version)' qa-target.json
-          echo "configuration=$(jq -r '.configurationId' qa-target.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Summarize the TEST result
-        env:
-          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          echo "TEST QA passed for $RELEASE_SHA ($RELEASE_TAG)." >> "$GITHUB_STEP_SUMMARY"
-          echo "Evidence: $GH_RUN_URL. No PROD deployment was created." >> "$GITHUB_STEP_SUMMARY"
+            '.environment == "TEST" and .commitSha == $sha and .releaseIdentity == $tag and .version == $version' qa-version.json
+          configuration=$(jq -r '.configurationId' qa-version.json)
+          echo "TEST QA passed for $RELEASE_TAG at $RELEASE_SHA. Configuration: $configuration." >> "$GITHUB_STEP_SUMMARY"
+          echo "Evidence: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"

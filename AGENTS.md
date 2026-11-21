@@ -30,3 +30,10 @@ pass/fail demonstrations. ZIP deployment support remains a later milestone.
 
 Use English, start responses with a bold result, and give concise progress
 updates. Do not use em dashes.
+
+## Coding preferences
+
+Prefer the smallest clear implementation that meets the requirement. Do not
+overengineer. Use standard tools and short, named Bash steps for workflows when
+they suffice. Avoid custom JavaScript, helper files, abstractions and defensive
+branches without a concrete need. Keep necessary correctness checks.
