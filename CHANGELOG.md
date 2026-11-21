@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.0.1...v2.1.0) (2026-11-21)
+
+
+### Features
+
+* PLT-1652 show image and configuration identities ([#18](https://github.com/devansh-helfie/trunk-based-development-lab/issues/18)) ([d758621](https://github.com/devansh-helfie/trunk-based-development-lab/commit/d758621f3b0c27dbc622268a9ff3f5ad468080a0))
+
+
+### Bug Fixes
+
+* **ui:** PLT-1652 clarify package version and release details ([#17](https://github.com/devansh-helfie/trunk-based-development-lab/issues/17)) ([429639e](https://github.com/devansh-helfie/trunk-based-development-lab/commit/429639ee161bd33c800db3b70e908a2856d45c4f))
+
 ## [2.0.1](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.0.0...v2.0.1) (2026-11-20)
 
 
