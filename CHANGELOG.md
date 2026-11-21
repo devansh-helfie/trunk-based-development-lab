@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.2.0...v2.3.0) (2026-11-21)
+
+
+### Features
+
+* PLT-1652 add TEST deployment history navigation ([#29](https://github.com/devansh-helfie/trunk-based-development-lab/issues/29)) ([251d434](https://github.com/devansh-helfie/trunk-based-development-lab/commit/251d43472755ac11201ec0c09a5dec64bbbe4288))
+
+
+### Bug Fixes
+
+* PLT-1652 trim release tag input before deployment ([#26](https://github.com/devansh-helfie/trunk-based-development-lab/issues/26)) ([34f4f91](https://github.com/devansh-helfie/trunk-based-development-lab/commit/34f4f91a6ccb7b746d6d07f0f9193f28b671c846))
+
 ## [2.2.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.1.0...v2.2.0) (2026-11-21)
 
 
