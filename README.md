@@ -326,17 +326,16 @@ DEV automatically builds and deploys each main merge. TEST independently selects
 an existing tag. Creating or deploying a historical tag does not reset main/DEV.
 All manual workflows execute their trusted configuration from branch main.
 
-1. **Prepare Release** (`prepare.yml`), operation `prepare`, lets Release Please calculate the next
-   version and create a normal version/changelog PR. Review, pass CI and merge.
-2. The same workflow, operation `create-tag`, accepts `source-ref`: blank selects
-   the dispatch commit on main; a SHA, tag or `main~1` can select an older main
-   commit. That exact source must belong to main and have a successful DEV run.
-   Select rc/stable and, for RC, a positive sequence number.
-3. The publication workflow reads the approved version from the latest merged
-   Release Please metadata, independently of the selected application source.
-   It creates or reuses an immutable tag and GitHub Release on that source.
-   Stable publication advances the metadata PR lifecycle to autorelease: tagged;
-   RC publication leaves the release pending. No version is typed manually.
+1. Run **Prepare Release** (`prepare.yml`) once. Select rc/stable and an RC
+   sequence when applicable. Release Please calculates the next version and
+   creates the version/changelog PR. There is no separate create-tag operation.
+2. The workflow saves the release selection as a JSON comment on that PR.
+   Optional `source-ref` is frozen to a main commit SHA during preparation;
+   blank uses the release PR merge commit. Review the selection before merging.
+3. Merge the release PR after CI passes. When its automatic Build/DEV run
+   succeeds, the same workflow creates the immutable tag and GitHub Release.
+   Failed DEV prevents publication. The selected source must also have passed
+   DEV. Stable publication advances the PR lifecycle; RC leaves it pending.
 4. **Deploy TEST** (`release.yml`) has exactly one input, `release-tag`. It only
    resolves an existing version tag, requires main ancestry and successful DEV,
    rebuilds/deploys that frozen source and runs live QA. It never creates tags,
