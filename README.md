@@ -329,9 +329,13 @@ Use Actions > Release > Run workflow from branch main. There are three operation
    user so normal PR checks run, review it, then merge with squash.
 2. Merging that PR updates package.json, the lockfile, release manifest and
    changelog. Its exact merge commit automatically builds and deploys DEV.
-3. After that DEV run succeeds, select `operation: test` and enter the merged
-   `release-pr` number. Blank `source-ref` selects that PR's merge SHA. An optional
-   SHA, tag or main-relative pointer must resolve to exactly the same commit.
+3. After that DEV run succeeds, select `operation: test`. `source-ref` accepts
+   a release commit SHA, tag or main-relative pointer. Blank selects the latest
+   version PR merge commit from main history. The workflow finds its merged
+   Release Please PR automatically; there is no PR-number input. Explicit
+   pointers must select a merged release metadata commit, not an app-only PR.
+   Automatic selection uses the configured `chore: PLT-1652 release` squash
+   subject, then verifies the actual merged PR through the GitHub API.
 4. Select `tag-mode: rc` with a positive `rc-number`, or `stable`. The workflow
    validates the release PR targets main, came from a Release Please branch,
    is merged, and has matching package/manifest versions and PR version title.
@@ -360,8 +364,8 @@ skip PR title/body validation because they do not represent a PR event.
 
 Select `operation: rollback` and provide an existing published version tag in
 `source-ref`, such as `v1.3.0-rc.1`. Raw SHAs, branch pointers, blank inputs,
-unknown tags and draft releases are rejected for rollback. `release-pr`,
-`tag-mode` and `rc-number` are ignored. The tag must resolve to main history
+unknown tags and draft releases are rejected for rollback. `tag-mode` and
+`rc-number` are ignored. The tag must resolve to main history
 and have a successful DEV pipeline. Existing tags and releases stay unchanged.
 
 Rollback bypasses Release Please and publication, rebuilds the selected source,

@@ -8,12 +8,8 @@ on:
         type: choice
         options: [prepare, test, rollback]
         default: prepare
-      release-pr:
-        description: Merged Release Please PR number, required for test
-        type: string
-        default: ''
       source-ref:
-        description: Optional pointer to the release PR merge commit; rollback requires an existing tag
+        description: Release commit SHA, tag or main~1; blank selects latest merged release; rollback requires a tag
         type: string
         default: ''
       tag-mode:
@@ -59,7 +55,7 @@ jobs:
       - name: Explain the next step
         run: |
           echo 'Review the Release Please draft, mark it ready, pass PR checks and merge it.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'After its merge commit passes DEV, run test with that release PR number. No tag or TEST deployment was created by prepare.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'After its merge commit passes DEV, run test with source-ref blank or set to its merge commit. No tag or TEST deployment was created by prepare.' >> "$GITHUB_STEP_SUMMARY"
 
   verify-dev:
     name: Validate the release source and DEV result
@@ -74,17 +70,16 @@ jobs:
       sha: ${{ steps.source.outputs.sha }}
       tag: ${{ steps.identity.outputs.tag }}
       version: ${{ steps.metadata.outputs.version }}
+      pr: ${{ steps.metadata-pr.outputs.number }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Validate the TEST inputs
         if: inputs.operation == 'test'
         env:
-          RELEASE_PR: ${{ inputs.release-pr }}
           TAG_MODE: ${{ inputs.tag-mode }}
           RC_NUMBER: ${{ inputs.rc-number }}
         run: |
-          [[ "$RELEASE_PR" =~ ^[1-9][0-9]*$ ]] || { echo 'Enter the merged Release Please PR number.'; exit 1; }
           if [[ "$TAG_MODE" == 'rc' ]]; then
             [[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'RC number must be a positive integer.'; exit 1; }
           fi
@@ -95,18 +90,6 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Require a merged Release Please PR targeting main
-        if: inputs.operation == 'test'
-        id: metadata-pr
-        env:
-          RELEASE_PR: ${{ inputs.release-pr }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR" > release-pr.json
-          jq -e '.merged == true and .base.ref == "main" and
-            (.head.ref | startswith("release-please--")) and
-            .head.repo.full_name == .base.repo.full_name' release-pr.json
-          echo "sha=$(jq -er '.merge_commit_sha' release-pr.json)" >> "$GITHUB_OUTPUT"
 
       - name: Require a published version tag for rollback
         if: inputs.operation == 'rollback'
@@ -119,20 +102,35 @@ jobs:
       - name: Resolve the source and require main ancestry
         id: source
         env:
-          SOURCE_REF: ${{ inputs.source-ref || steps.metadata-pr.outputs.sha }}
-          MERGE_SHA: ${{ steps.metadata-pr.outputs.sha }}
+          SOURCE_REF: ${{ inputs.source-ref }}
           OPERATION: ${{ inputs.operation }}
         run: |
           git branch --force main "$GITHUB_SHA"
           if [[ "$OPERATION" == 'rollback' ]]; then
             SOURCE_REF="refs/tags/$SOURCE_REF"
+          elif [[ -z "$SOURCE_REF" ]]; then
+            SOURCE_REF=$(git log "$GITHUB_SHA" -1 --format=%H --grep='^chore: PLT-1652 release [0-9]')
+            [[ -n "$SOURCE_REF" ]] || { echo 'Merge a Release Please version PR before running TEST.'; exit 1; }
           fi
           sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
           git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo 'Select a commit from main history.'; exit 1; }
-          if [[ "$OPERATION" == 'test' ]]; then
-            [[ "$sha" == "$MERGE_SHA" ]] || { echo 'TEST must use the exact release PR merge commit. Use rollback for an existing release tag.'; exit 1; }
-          fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Find the merged release PR for the selected commit
+        if: inputs.operation == 'test'
+        id: metadata-pr
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls" > source-prs.json
+          pr=$(jq -er --arg sha "$SOURCE_SHA" '[.[] | select(.merged_at != null and
+            .merge_commit_sha == $sha and .base.ref == "main" and
+            (.head.ref | startswith("release-please--")))] |
+            if length == 1 then .[0].number else error("Select a merged Release Please commit, or use rollback for an existing release tag.") end' source-prs.json)
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" > release-pr.json
+          jq -e --arg sha "$SOURCE_SHA" '.merged == true and .merge_commit_sha == $sha and
+            .head.repo.full_name == .base.repo.full_name' release-pr.json
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
 
       - name: Require matching package and release manifest versions
         if: inputs.operation == 'test'
@@ -226,7 +224,7 @@ jobs:
       - name: Mark the release PR as published after stable publication
         if: inputs.operation == 'test' && inputs.tag-mode == 'stable'
         env:
-          RELEASE_PR: ${{ inputs.release-pr }}
+          RELEASE_PR: ${{ needs.verify-dev.outputs.pr }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/issues/$RELEASE_PR/labels" \
             --jq '{labels: ([.[].name | select(. != "autorelease: pending")] + ["autorelease: tagged"] | unique)}' > published-labels.json
