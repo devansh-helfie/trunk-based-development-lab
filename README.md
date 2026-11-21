@@ -322,14 +322,17 @@ demonstrate a real code change on main, a new artifact and revalidation.
 
 ### Release preparation and TEST
 
-Use Actions > Release > Run workflow from branch main. There are three operations:
+Preparation and deployment have separate manually dispatched workflows. Run
+both from branch main. They share a concurrency group so lifecycle changes do
+not run simultaneously.
 
-1. `prepare` only creates or updates the Release Please draft version/changelog
-   PR. It publishes no tags and deploys no environment. Mark the draft ready as a
+1. Actions > Prepare Release > Run workflow (`prepare.yml`) only creates or
+   updates the Release Please draft version/changelog PR. It publishes no tags and deploys no environment. Mark the draft ready as a
    user so normal PR checks run, review it, then merge with squash.
 2. Merging that PR updates package.json, the lockfile, release manifest and
    changelog. Its exact merge commit automatically builds and deploys DEV.
-3. After that DEV run succeeds, select `operation: test`. `source-ref` accepts
+3. After that DEV run succeeds, open Actions > Release > Run workflow
+   (`release.yml`) and select `operation: test`. `source-ref` accepts
    a release commit SHA, tag or main-relative pointer. Blank selects the latest
    version PR merge commit from main history. The workflow finds its merged
    Release Please PR automatically; there is no PR-number input. Explicit
@@ -379,7 +382,7 @@ skip PR title/body validation because they do not represent a PR event.
 
 ### TEST rollback
 
-Select `operation: rollback` and provide an existing published version tag in
+In Actions > Release, select `operation: rollback` and provide an existing published version tag in
 `source-ref`, such as `v1.3.0-rc.1`. Raw SHAs, branch pointers, blank inputs,
 unknown tags and draft releases are rejected for rollback. `tag-mode` and
 `rc-number` are ignored. The tag must resolve to main history
