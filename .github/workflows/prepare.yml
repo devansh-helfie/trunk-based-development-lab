@@ -3,13 +3,8 @@ name: Prepare Release
 on:
   workflow_dispatch:
     inputs:
-      operation:
-        description: Prepare the version PR, or create a tag after merging it
-        type: choice
-        options: [prepare, create-tag]
-        default: prepare
       source-ref:
-        description: Main commit SHA, tag or main~1; blank selects this run's main commit
+        description: Main SHA, tag or main~1; blank selects the release PR merge commit
         type: string
         default: ''
       tag-mode:
@@ -22,6 +17,10 @@ on:
         type: string
         default: '1'
 
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -38,15 +37,42 @@ concurrency:
 jobs:
   prepare:
     name: Prepare the version PR only
-    if: github.ref == 'refs/heads/main' && inputs.operation == 'prepare'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
       issues: write
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      SOURCE_REF: ${{ inputs.source-ref }}
+      TAG_MODE: ${{ inputs.tag-mode }}
+      RC_NUMBER: ${{ inputs.rc-number }}
     steps:
+      - name: Check out main to freeze the source selection
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and save the release selection
+        run: |
+          source_sha=''
+          if [[ -n "$SOURCE_REF" ]]; then
+            git branch --force main "$GITHUB_SHA"
+            source_sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
+            git merge-base --is-ancestor "$source_sha" "$GITHUB_SHA"
+          fi
+          if [[ "$TAG_MODE" == 'rc' ]]; then
+            [[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'RC number must be a positive integer.'; exit 1; }
+          fi
+          jq -n --arg sha "$source_sha" --arg mode "$TAG_MODE" --arg rc "$RC_NUMBER" \
+            '{releaseSelection: true, sourceSha: $sha, tagMode: $mode, rcNumber: $rc}' > release-selection.json
+
       - name: Calculate the next version with Release Please
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -55,14 +81,23 @@ jobs:
           manifest-file: .release-please-manifest.json
           skip-github-release: true
 
-      - name: Explain the next step
+      - name: Attach the selection to the release PR
+        env:
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
-          echo 'Review the Release Please PR, pass its CI checks and merge it.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'After merging, run this workflow with operation=create-tag and the desired source-ref, then Deploy TEST with its tag. Preparation creates no tag or deployment.' >> "$GITHUB_STEP_SUMMARY"
+          [[ -n "$RELEASE_PR" ]] || { echo 'No release PR was returned. Check for an unpublished merged release or no releasable changes.'; exit 1; }
+          pr=$(jq -er '.number' <<< "$RELEASE_PR")
+          gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body-file release-selection.json
+          echo "Review and merge release PR #$pr. Its successful DEV run will create the tag automatically." >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     name: Publish the approved version on the selected source
-    if: github.ref == 'refs/heads/main' && inputs.operation == 'create-tag'
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_commit.message, 'chore: PLT-1652 release ')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -72,22 +107,53 @@ jobs:
       actions: read
     env:
       GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-      SOURCE_REF: ${{ inputs.source-ref || github.sha }}
-      TAG_MODE: ${{ inputs.tag-mode }}
-      RC_NUMBER: ${{ inputs.rc-number }}
+      MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Check out trusted main history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Read the version from merged Release Please metadata
+        run: |
+          metadata_sha="$MAIN_SHA"
+          [[ -n "$metadata_sha" ]] || { echo 'Merge a Release Please version PR first.'; exit 1; }
+          git show "$metadata_sha:.release-please-manifest.json" > version-manifest.json
+          version=$(jq -er '.["."] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' version-manifest.json)
+          git show "$MAIN_SHA:.release-please-manifest.json" | jq -e --arg v "$version" '.["."] == $v'
+          git show "$MAIN_SHA:package.json" | jq -e --arg v "$version" '.version == $v'
+          gh api "repos/$GITHUB_REPOSITORY/commits/$metadata_sha/pulls" > metadata-prs.json
+          pr=$(jq -er --arg sha "$metadata_sha" --arg title "chore: PLT-1652 release $version" '[.[] |
+            select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == "main" and
+            .title == $title and (.head.ref | startswith("release-please--")) and
+            .head.repo.full_name == .base.repo.full_name)] |
+            if length == 1 then .[0].number else error("No matching merged Release Please PR") end' metadata-prs.json)
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "METADATA_SHA=$metadata_sha" >> "$GITHUB_ENV"
+          echo "RELEASE_PR=$pr" >> "$GITHUB_ENV"
+
+      - name: Read the release selection saved during preparation
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$RELEASE_PR/comments?per_page=100" > release-comments.json
+          jq --arg owner "$GITHUB_REPOSITORY_OWNER" '[.[][] |
+            select(.user.login == $owner or .user.login == "github-actions[bot]") |
+            .body | fromjson? | select(.releaseSelection == true)] | last' \
+            release-comments.json > release-selection.json
+          jq -e '.tagMode == "rc" or .tagMode == "stable"' release-selection.json
+          source_sha=$(jq -er '.sourceSha | strings' release-selection.json)
+          [[ -n "$source_sha" ]] || source_sha="$METADATA_SHA"
+          [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]] || { echo 'Saved source must be a full commit SHA.'; exit 1; }
+          echo "SOURCE_REF=$source_sha" >> "$GITHUB_ENV"
+          echo "TAG_MODE=$(jq -r '.tagMode' release-selection.json)" >> "$GITHUB_ENV"
+          echo "RC_NUMBER=$(jq -r '.rcNumber' release-selection.json)" >> "$GITHUB_ENV"
+
       - name: Resolve and freeze the selected source
         run: |
-          git branch --force main "$GITHUB_SHA"
+          git branch --force main "$MAIN_SHA"
           sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
-          git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo 'Select a commit from main history.'; exit 1; }
+          git merge-base --is-ancestor "$sha" "$MAIN_SHA" || { echo 'Select a commit from main history.'; exit 1; }
           echo "SOURCE_SHA=$sha" >> "$GITHUB_ENV"
           git show "$sha:package.json" > source-package.json
 
@@ -98,24 +164,6 @@ jobs:
           gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
             -f head_sha="$SOURCE_SHA" -f event=push -f status=success -f per_page=1 \
             --jq '.total_count > 0' | grep -qx true
-
-      - name: Read the version from merged Release Please metadata
-        run: |
-          metadata_sha=$(git log "$GITHUB_SHA" -1 --format=%H --grep='^chore: PLT-1652 release [0-9]')
-          [[ -n "$metadata_sha" ]] || { echo 'Merge a Release Please version PR first.'; exit 1; }
-          git show "$metadata_sha:.release-please-manifest.json" > version-manifest.json
-          version=$(jq -er '.["."] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' version-manifest.json)
-          git show "$GITHUB_SHA:.release-please-manifest.json" | jq -e --arg v "$version" '.["."] == $v'
-          git show "$GITHUB_SHA:package.json" | jq -e --arg v "$version" '.version == $v'
-          gh api "repos/$GITHUB_REPOSITORY/commits/$metadata_sha/pulls" > metadata-prs.json
-          pr=$(jq -er --arg sha "$metadata_sha" --arg title "chore: PLT-1652 release $version" '[.[] |
-            select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == "main" and
-            .title == $title and (.head.ref | startswith("release-please--")) and
-            .head.repo.full_name == .base.repo.full_name)] |
-            if length == 1 then .[0].number else error("No matching merged Release Please PR") end' metadata-prs.json)
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          echo "METADATA_SHA=$metadata_sha" >> "$GITHUB_ENV"
-          echo "RELEASE_PR=$pr" >> "$GITHUB_ENV"
 
       - name: Select the tag and describe its actual source
         run: |
@@ -159,7 +207,7 @@ jobs:
           fi
 
       - name: Advance Release Please lifecycle after stable publication
-        if: inputs.tag-mode == 'stable'
+        if: env.TAG_MODE == 'stable'
         run: |
           gh api "repos/$GITHUB_REPOSITORY/issues/$RELEASE_PR/labels" \
             --jq '{labels: ([.[].name | select(. != "autorelease: pending")] + ["autorelease: tagged"] | unique)}' > published-labels.json
