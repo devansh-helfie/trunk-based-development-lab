@@ -1,0 +1,41 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# Serialize preparation with release publication to protect the same lifecycle.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare the version PR only
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Calculate the next version with Release Please
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+
+      - name: Explain the next step
+        run: |
+          echo 'Review the Release Please draft, mark it ready, pass PR checks and merge it.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'After its merge commit passes DEV, run test with source-ref blank or set to its merge commit. No tag or TEST deployment was created by prepare.' >> "$GITHUB_STEP_SUMMARY"
+
