@@ -336,7 +336,9 @@ Use Actions > Release > Run workflow from branch main. There are three operation
    pointers must select a merged release metadata commit, not an app-only PR.
    Automatic selection uses the configured `chore: PLT-1652 release` squash
    subject, then verifies the actual merged PR through the GitHub API.
-4. Select `tag-mode: rc` with a positive `rc-number`, or `stable`. The workflow
+4. For a new tag select `tag-mode: rc` with a positive `rc-number`, or `stable`.
+   An existing tag supplied in `source-ref` is preserved exactly and determines
+   its own stable/RC mode; tag-mode and rc-number are ignored. The workflow
    validates the release PR targets main, came from a Release Please branch,
    is merged, and has matching package/manifest versions and PR version title.
    It also requires that exact commit to belong to main and have a successful
@@ -348,12 +350,27 @@ Use Actions > Release > Run workflow from branch main. There are three operation
    commit, release identity and package version. Token-created tag events do not
    trigger another workflow automatically. PROD is not deployed.
 
-Release Please owns version calculation and the metadata PR. Named workflow
-steps publish the selected RC or stable tag after the metadata merge and DEV
-verification. Stable publication marks that PR `autorelease: tagged`, preserving
-other labels, so the next prepare can advance the release lifecycle. RC-only
-publication leaves it pending until its stable tag is published. Neither mode
-marks a TEST release latest. Published tags alone do not mean QA approved.
+Release Please owns version calculation, the metadata PR, stable tag, stable
+GitHub Release, release notes and lifecycle labels. Stable publication calls the
+native action with `skip-github-pull-request: true`; no custom step creates a
+stable tag or edits autorelease labels. Native publication is restricted to the
+latest merged metadata commit and exactly one selected merged pending release,
+so another pending release cannot be published before its validation.
+
+RC tags are supplementary identities derived from that approved base version.
+Only the RC path uses explicit tag/prerelease creation. RC publication leaves
+the version PR pending until its stable version is published through Release
+Please. Native stable releases use Release Please defaults, including its latest
+release behavior; a GitHub latest designation is not QA or PROD approval.
+Published tags alone never authorize PROD.
+
+Existing published stable/RC releases are reused after verifying the exact SHA,
+version and release type. Annotated tags are resolved to their commit too.
+A manual stable tag may be supplied if it matches the metadata version and SHA;
+Release Please still owns creation of its GitHub Release and lifecycle labels.
+Do not manually publish a GitHub Release for a pending release PR: reuse does
+not adopt externally published releases into Release Please lifecycle tracking.
+Legacy versions remain available through rollback.
 
 Application PRs are separate from the version PR: multiple application PRs can
 be grouped into one release. PR policy only runs on pull-request events. Main
