@@ -29,6 +29,7 @@ jobs:
       - name: Calculate the next version with Release Please
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -36,6 +37,6 @@ jobs:
 
       - name: Explain the next step
         run: |
-          echo 'Review the Release Please draft, mark it ready, pass PR checks and merge it.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Review the Release Please PR, pass its CI checks and merge it.' >> "$GITHUB_STEP_SUMMARY"
           echo 'After its merge commit passes DEV, run test with source-ref blank or set to its merge commit. No tag or TEST deployment was created by prepare.' >> "$GITHUB_STEP_SUMMARY"
 
