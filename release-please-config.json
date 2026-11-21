@@ -3,7 +3,7 @@
   "release-type": "node",
   "include-component-in-tag": false,
   "include-v-in-tag": true,
-  "draft-pull-request": true,
+  "draft-pull-request": false,
   "bootstrap-sha": "d624de8781f4a29b732723b134a942d07483d461",
   "pull-request-title-pattern": "chore: PLT-1652 release ${version}",
   "group-pull-request-title-pattern": "chore: PLT-1652 release ${version}",

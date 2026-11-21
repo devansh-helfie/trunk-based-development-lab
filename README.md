@@ -326,9 +326,10 @@ Preparation and deployment have separate manually dispatched workflows. Run
 both from branch main. They share a concurrency group so lifecycle changes do
 not run simultaneously.
 
-1. Actions > Prepare Release > Run workflow (`prepare.yml`) only creates or
-   updates the Release Please draft version/changelog PR. It publishes no tags and deploys no environment. Mark the draft ready as a
-   user so normal PR checks run, review it, then merge with squash.
+1. Actions > Prepare Release > Run workflow (`prepare.yml`) creates or updates
+   the version/changelog PR. New PRs are ready for review rather than drafts.
+   Review the PR, let normal CI pass, then merge with squash. Preparation
+   publishes no tags and deploys no environment.
 2. Merging that PR updates package.json, the lockfile, release manifest and
    changelog. Its exact merge commit automatically builds and deploys DEV.
 3. After that DEV run succeeds, open Actions > Release > Run workflow
@@ -350,8 +351,8 @@ not run simultaneously.
    `v2.0.0-rc.1` or `v2.0.0`. A tag on the same commit is reusable; a tag on a
    different commit fails with an explicit error and is never moved.
 6. Build and Deploy run directly for TEST, then QA checks live pricing, flags,
-   commit, release identity and package version. Token-created tag events do not
-   trigger another workflow automatically. PROD is not deployed.
+   commit, release identity and package version. Deployment is called directly
+   rather than relying on another tag-triggered workflow. PROD is not deployed.
 
 Release Please owns version calculation, the metadata PR, stable tag, stable
 GitHub Release, release notes and lifecycle labels. Stable publication calls the
@@ -404,12 +405,17 @@ use rollback to restore an already published application version.
 ### Setup and current limits
 
 - Allow GitHub Actions to create PRs in the repository's Actions settings.
-- The automatic GITHUB_TOKEN is the default. GitHub can reject creation of a
+- Preparation and publication use the repository Actions secret RELEASE_TOKEN
+  when configured, otherwise GITHUB_TOKEN. A PAT-created version PR can start CI
+  without GitHub's workflow-approval prompt. GITHUB_TOKEN-created PRs can place
+  CI in an approval-required state. This is separate from human PR review;
+  changing the token does not approve or merge a PR. GitHub can reject creation of a
   historical tag with HTTP 403 when additional Workflows write permission is
   required. For unattended historical publication, optionally configure the
   repository Actions secret `RELEASE_TOKEN` using a fine-grained token limited to
   this personal repository with Contents, Workflows and Pull requests write access.
-  It is used only by the publication job. No token is required for tag reuse.
+  It is used by preparation and publication; build/deploy keep GITHUB_TOKEN.
+  No additional release token is required for tag reuse.
   Alternatively, create the exact tag with your existing authorized personal
   CLI login, then rerun the failed jobs. The workflow always verifies its SHA.
   No credential is created or stored by this workflow change.
