@@ -5,7 +5,9 @@ async function showVersion() {
     version: 'version',
     release: 'releaseIdentity',
     commit: 'commitSha',
-    build: 'buildRunId'
+    build: 'buildRunId',
+    image: 'imageDigest',
+    configuration: 'configurationId'
   };
 
   try {
