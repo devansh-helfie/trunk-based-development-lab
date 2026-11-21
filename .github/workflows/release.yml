@@ -31,6 +31,7 @@ jobs:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
       package-version: ${{ steps.source.outputs.package-version }}
+      release-tag: ${{ steps.source.outputs.release-tag }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_TAG: ${{ inputs.release-tag }}
@@ -45,11 +46,14 @@ jobs:
       - name: Resolve the tag to its main commit
         id: source
         run: |
+          # Remove surrounding whitespace while preserving invalid spaces inside a tag.
+          RELEASE_TAG="$(printf '%s' "$RELEASE_TAG" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Enter an existing version tag.'; exit 1; }
           sha=$(git rev-parse --verify --end-of-options "refs/tags/$RELEASE_TAG^{commit}")
           git merge-base --is-ancestor "$sha" "$GITHUB_SHA" || { echo 'The tag must point to main history.'; exit 1; }
           git show "$sha:package.json" > source-package.json
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "release-tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "package-version=$(jq -er '.version' source-package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Require that exact source to have passed DEV
@@ -72,7 +76,7 @@ jobs:
     with:
       source-ref: ${{ needs.validate.outputs.sha }}
       environment: TEST
-      release-tag: ${{ inputs.release-tag }}
+      release-tag: ${{ needs.validate.outputs.release-tag }}
 
   qa:
     name: Run QA against TEST
@@ -85,7 +89,7 @@ jobs:
       BASE_URL: http://127.0.0.1:3002
       QA_EXPECT_BULK_DISCOUNT: 'true'
       RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-      RELEASE_TAG: ${{ inputs.release-tag }}
+      RELEASE_TAG: ${{ needs.validate.outputs.release-tag }}
       RELEASE_VERSION: ${{ needs.validate.outputs.package-version }}
     steps:
       - name: Check out the release QA checks
