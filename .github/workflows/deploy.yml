@@ -48,6 +48,11 @@ jobs:
       DEMO_FAULT: ${{ inputs.environment == 'TEST' && vars.QA_DEMO == 'fail' && 'discount-boundary' || 'none' }}
       BUILD_RUN_ID: ${{ github.run_id }}
     steps:
+      - name: Require a stable version tag for PROD
+        if: inputs.environment == 'PROD'
+        run: |
+          [[ "$RELEASE_IDENTITY" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'PROD requires a stable version tag.'; exit 1; }
+
       - name: Validate the TEST demonstration setting
         if: inputs.environment == 'TEST'
         run: |
@@ -91,5 +96,5 @@ jobs:
       - name: Check the running version
         run: |
           curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:$APP_PORT/version" |
-            jq -e --arg environment "$APP_ENV" --arg sha "$COMMIT_SHA" --arg digest "$IMAGE_DIGEST" \
-              '.environment == $environment and .commitSha == $sha and .imageDigest == $digest'
+            jq -e --arg environment "$APP_ENV" --arg sha "$COMMIT_SHA" --arg digest "$IMAGE_DIGEST" --arg tag "$RELEASE_IDENTITY" \
+              '.environment == $environment and .commitSha == $sha and .imageDigest == $digest and .releaseIdentity == $tag'

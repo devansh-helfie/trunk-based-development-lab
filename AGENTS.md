@@ -37,3 +37,11 @@ Prefer the smallest clear implementation that meets the requirement. Do not
 overengineer. Use standard tools and short, named Bash steps for workflows when
 they suffice. Avoid custom JavaScript, helper files, abstractions and defensive
 branches without a concrete need. Keep necessary correctness checks.
+
+## Next iteration: promotion eligibility
+
+TEST must require a successful DEV deployment for its selected source. PROD must
+require successful TEST deployment and QA for its selected tag and source. Use
+the latest relevant run or attempt: a newer failure must block promotion even
+when an older successful run or QA artifact exists. Unrelated source commits
+do not change the eligibility of the selected release.

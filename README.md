@@ -358,8 +358,27 @@ Existing tags on a different SHA fail and are never moved. Repeating a successfu
 publication on the same SHA reuses it. A failed QA leaves the selected source in
 TEST and does not mark it approved for PROD. Stable release publication alone
 is not QA approval. Tags already published by the earlier native flow remain
-usable. Rollback UI and PROD promotion are deferred; Deploy TEST can explicitly
-retest an older existing tag.
+usable. Rollback UI is deferred; Deploy TEST can explicitly retest an older
+existing tag.
+
+### PROD promotion
+
+After merging this workflow change, run Deploy TEST again so successful QA saves
+its verification artifact (retained for 14 days). Earlier runs have no artifact.
+Then run **Promote to PROD** (`prod.yml`) from main with only `tested-tag`.
+
+The workflow requires a successful Deploy TEST run whose evidence matches the
+exact tag and commit. It finds the merged Release Please version PR, converts
+`v2.3.0-rc.1` to `v2.3.0` on that same commit, or reuses a stable tag tested directly.
+An existing stable tag on another commit is rejected. Stable publication updates
+the Release Please lifecycle and is recorded before deployment approval.
+
+The existing build workflow rebuilds the frozen source for PROD. Its deployment
+job pauses at the GitHub PROD environment for approval. For this solo public POC,
+devansh-helfie is the required reviewer and self-review is allowed. Approval identity and deployment outcome remain in GitHub Actions.
+No PROD container starts before approval. The local URL is
+http://prod.localhost:3003. Deployment verifies environment, source SHA, digest
+and stable release identity. A stable tag alone does not authorize deployment.
 
 ### Setup and limits
 
@@ -371,15 +390,20 @@ retest an older existing tag.
 - Set TEST environment variable QA_DEMO to pass or fail, then redeploy TEST.
   Missing defaults to pass. Invalid values fail deployment. Saved TEST flags
   remain independent of QA assertions. DEV always keeps fault injection off.
-- Run scripts/setup-env.sh TEST once on the Mac; existing private settings are
+- Run scripts/setup-env.sh TEST and scripts/setup-env.sh PROD once on the Mac; existing private settings are
   preserved. Separate Compose projects keep DEV and TEST ports and data apart.
-- Build-once/deploy-many, ZIP support, human QA sign-off and PROD gates remain
-  later milestones. The current POC deliberately rebuilds the selected source.
+- Build-once/deploy-many and ZIP support remain later milestones. The current
+  POC deliberately rebuilds the TEST-approved source for PROD. Human approval
+  uses the GitHub PROD environment gate.
 
 ## Future promotion milestones
 
-Human QA sign-off, RC-to-stable promotion on the same verified commit, PROD
-promotion, ZIP deployment and same-digest artifact reuse remain future work.
+Next iteration: evaluate the latest relevant lower-environment run or attempt.
+A newer DEV failure must block TEST for that source, and a newer TEST deployment
+or QA failure must block PROD for that tag/source, even if older success evidence
+exists. Current gates check successful DEV history and available QA evidence.
+
+Rollback UI, ZIP deployment and same-digest artifact reuse remain future work.
 Earlier designs are retained in `.backups/`.
 
 ## Learning log
