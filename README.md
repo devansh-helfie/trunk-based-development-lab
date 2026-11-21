@@ -326,9 +326,9 @@ DEV automatically builds and deploys each main merge. TEST independently selects
 an existing tag. Creating or deploying a historical tag does not reset main/DEV.
 All manual workflows execute their trusted configuration from branch main.
 
-1. **Prepare Release** (`prepare.yml`) lets Release Please calculate the next
+1. **Prepare Release** (`prepare.yml`), operation `prepare`, lets Release Please calculate the next
    version and create a normal version/changelog PR. Review, pass CI and merge.
-2. **Create Release Tag** (`create-tag.yml`) accepts `source-ref`: blank selects
+2. The same workflow, operation `create-tag`, accepts `source-ref`: blank selects
    the dispatch commit on main; a SHA, tag or `main~1` can select an older main
    commit. That exact source must belong to main and have a successful DEV run.
    Select rc/stable and, for RC, a positive sequence number.
