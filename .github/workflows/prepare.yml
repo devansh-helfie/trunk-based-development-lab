@@ -4,19 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       source-ref:
-        description: Main SHA, tag or main~1; blank selects the release PR merge commit
+        description: Main SHA, tag or main~1; blank uses the release PR merge commit
         type: string
         default: ''
       tag-mode:
-        description: Tag format using the merged Release Please version
+        description: Release tag format
         type: choice
         options: [rc, stable]
         default: rc
       rc-number:
-        description: Positive RC sequence, ignored in stable mode
+        description: RC sequence, ignored for stable
         type: string
         default: '1'
-
   workflow_run:
     workflows: [Build]
     types: [completed]
@@ -25,11 +24,6 @@ on:
 permissions:
   contents: read
 
-defaults:
-  run:
-    shell: bash
-
-# Serialize preparation with release publication to protect the same lifecycle.
 concurrency:
   group: release-main
   cancel-in-progress: false
@@ -46,34 +40,14 @@ jobs:
       issues: write
     outputs:
       pending-sha: ${{ steps.selection.outputs.pending-sha }}
-    env:
-      GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-      SOURCE_REF: ${{ inputs.source-ref }}
-      TAG_MODE: ${{ inputs.tag-mode }}
-      RC_NUMBER: ${{ inputs.rc-number }}
     steps:
-      - name: Check out main to freeze the source selection
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate and save the release selection
-        run: |
-          source_sha=''
-          if [[ -n "$SOURCE_REF" ]]; then
-            git branch --force main "$GITHUB_SHA"
-            source_sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
-            git merge-base --is-ancestor "$source_sha" "$GITHUB_SHA"
-          fi
-          if [[ "$TAG_MODE" == 'rc' ]]; then
-            [[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'RC number must be a positive integer.'; exit 1; }
-          fi
-          jq -n --arg sha "$source_sha" --arg mode "$TAG_MODE" --arg rc "$RC_NUMBER" \
-            '{releaseSelection: true, sourceSha: $sha, tagMode: $mode, rcNumber: $rc}' > release-selection.json
-
-      - name: Calculate the next version with Release Please
+      - name: Create or update the version PR
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
@@ -83,32 +57,45 @@ jobs:
           manifest-file: .release-please-manifest.json
           skip-github-release: true
 
-      - name: Attach the selection to the new or pending release PR
+      - name: Save the source and tag choices on the release PR
         id: selection
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           RELEASE_PR: ${{ steps.release.outputs.pr }}
-        run: |
-          if [[ -n "$RELEASE_PR" ]]; then
-            pr=$(jq -er '.number' <<< "$RELEASE_PR")
-          else
-            version=$(jq -er '.["."]' .release-please-manifest.json)
-            gh pr list --repo "$GITHUB_REPOSITORY" --state merged --base main \
-              --label 'autorelease: pending' --json number,title,headRefName,mergeCommit > pending-prs.json
-            jq -e --arg title "chore: PLT-1652 release $version" '[.[] |
-              select(.title == $title and (.headRefName | startswith("release-please--")))] |
-              if length == 1 then .[0] else error("No single pending release found; there may be no releasable changes") end' \
-              pending-prs.json > pending-release.json
-            pr=$(jq -r '.number' pending-release.json)
-            echo "pending-sha=$(jq -r '.mergeCommit.oid' pending-release.json)" >> "$GITHUB_OUTPUT"
-            echo "Resuming already merged release PR #$pr. The selected source must pass DEV before publication." >> "$GITHUB_STEP_SUMMARY"
-          fi
-          gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body-file release-selection.json
-          if [[ -n "$RELEASE_PR" ]]; then
-            echo "Review and merge release PR #$pr. Its successful DEV run will create the tag automatically." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          SOURCE_REF: ${{ inputs.source-ref }}
+          TAG_MODE: ${{ inputs.tag-mode }}
+          RC_NUMBER: ${{ inputs.rc-number }}
+        with:
+          github-token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+            const { owner, repo } = context.repo;
+            const mode = process.env.TAG_MODE;
+            const rc = process.env.RC_NUMBER.trim();
+            if (mode === 'rc' && !/^[1-9][0-9]*$/.test(rc)) throw new Error('Enter a positive RC number.');
+            const ref = process.env.SOURCE_REF.trim();
+            if (ref) git('branch', '--force', 'main', context.sha);
+            const source = ref ? git('rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`) : '';
+            if (source) git('merge-base', '--is-ancestor', source, context.sha);
+
+            let pr = JSON.parse(process.env.RELEASE_PR || 'null');
+            if (!pr) {
+              const version = require(`${process.env.GITHUB_WORKSPACE}/.release-please-manifest.json`)['.'];
+              const closed = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'closed', base: 'main' });
+              const pending = closed.filter(p => p.merged_at && p.title === `chore: PLT-1652 release ${version}` &&
+                p.head.ref.startsWith('release-please--') && p.head.repo?.full_name === `${owner}/${repo}` &&
+                p.labels.some(label => label.name === 'autorelease: pending'));
+              if (pending.length !== 1) throw new Error('No unique pending release found. There may be no releasable changes.');
+              pr = pending[0];
+              core.setOutput('pending-sha', pr.merge_commit_sha);
+            }
+            const selection = { releaseSelection: true, sourceSha: source, tagMode: mode, rcNumber: rc };
+            await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: JSON.stringify(selection, null, 2) });
+            await core.summary.addRaw(`Release PR #${pr.number}: merge it to publish after DEV passes, or resume publication if already merged.`).write();
 
   publish:
-    name: Publish the approved version on the selected source
+    name: Publish after DEV passes
     needs: prepare
     if: >-
       always() && (
@@ -128,114 +115,104 @@ jobs:
       issues: write
       actions: read
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-      MAIN_SHA: ${{ github.event.workflow_run.head_sha || needs.prepare.outputs.pending-sha }}
+      RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha || needs.prepare.outputs.pending-sha }}
     steps:
-      - name: Check out trusted main history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.MAIN_SHA }}
+          ref: ${{ env.RELEASE_COMMIT }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Read the version from merged Release Please metadata
-        run: |
-          metadata_sha="$MAIN_SHA"
-          [[ -n "$metadata_sha" ]] || { echo 'Merge a Release Please version PR first.'; exit 1; }
-          git show "$metadata_sha:.release-please-manifest.json" > version-manifest.json
-          version=$(jq -er '.["."] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' version-manifest.json)
-          git show "$MAIN_SHA:.release-please-manifest.json" | jq -e --arg v "$version" '.["."] == $v'
-          git show "$MAIN_SHA:package.json" | jq -e --arg v "$version" '.version == $v'
-          gh api "repos/$GITHUB_REPOSITORY/commits/$metadata_sha/pulls" > metadata-prs.json
-          pr=$(jq -er --arg sha "$metadata_sha" --arg title "chore: PLT-1652 release $version" '[.[] |
-            select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == "main" and
-            .title == $title and (.head.ref | startswith("release-please--")) and
-            .head.repo.full_name == .base.repo.full_name)] |
-            if length == 1 then .[0].number else error("No matching merged Release Please PR") end' metadata-prs.json)
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          echo "METADATA_SHA=$metadata_sha" >> "$GITHUB_ENV"
-          echo "RELEASE_PR=$pr" >> "$GITHUB_ENV"
+      - name: Read the approved version and saved source
+        id: selection
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+            const { owner, repo } = context.repo;
+            const commit = process.env.RELEASE_COMMIT;
+            const version = require(`${process.env.GITHUB_WORKSPACE}/.release-please-manifest.json`)['.'];
+            if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid Release Please version.');
+            if (require(`${process.env.GITHUB_WORKSPACE}/package.json`).version !== version) throw new Error('Package and Release Please versions differ.');
+            const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, { owner, repo, commit_sha: commit });
+            const matches = prs.filter(p => p.merged_at && p.merge_commit_sha === commit && p.base.ref === 'main' &&
+              p.title === `chore: PLT-1652 release ${version}` && p.head.ref.startsWith('release-please--') &&
+              p.head.repo?.full_name === `${owner}/${repo}`);
+            if (matches.length !== 1) throw new Error('Commit must be a merged Release Please PR.');
+            const pr = matches[0];
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr.number });
+            const selections = comments.filter(c => [owner, 'github-actions[bot]'].includes(c.user.login)).flatMap(c => {
+              try { const value = JSON.parse(c.body); return value?.releaseSelection === true ? [value] : []; }
+              catch { return []; }
+            });
+            const plan = selections.at(-1);
+            if (!plan || !['rc', 'stable'].includes(plan.tagMode)) throw new Error('Missing valid release selection on the PR.');
+            if (plan.tagMode === 'rc' && !/^[1-9][0-9]*$/.test(plan.rcNumber)) throw new Error('Invalid RC number.');
+            const source = plan.sourceSha || commit;
+            if (!/^[a-f0-9]{40}$/.test(source)) throw new Error('Source must be a full commit SHA.');
+            git('merge-base', '--is-ancestor', source, commit);
+            const sourceVersion = JSON.parse(git('show', `${source}:package.json`)).version;
+            core.setOutput('sha', source);
+            core.setOutput('pr', pr.number);
+            core.setOutput('mode', plan.tagMode);
+            core.setOutput('tag', `v${version}${plan.tagMode === 'rc' ? `-rc.${plan.rcNumber}` : ''}`);
+            core.setOutput('source-version', sourceVersion);
 
-      - name: Read the release selection saved during preparation
-        run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$RELEASE_PR/comments?per_page=100" > release-comments.json
-          jq --arg owner "$GITHUB_REPOSITORY_OWNER" '[.[][] |
-            select(.user.login == $owner or .user.login == "github-actions[bot]") |
-            .body | fromjson? | select(.releaseSelection == true)] | last' \
-            release-comments.json > release-selection.json
-          jq -e '.tagMode == "rc" or .tagMode == "stable"' release-selection.json
-          source_sha=$(jq -er '.sourceSha | strings' release-selection.json)
-          [[ -n "$source_sha" ]] || source_sha="$METADATA_SHA"
-          [[ "$source_sha" =~ ^[a-f0-9]{40}$ ]] || { echo 'Saved source must be a full commit SHA.'; exit 1; }
-          echo "SOURCE_REF=$source_sha" >> "$GITHUB_ENV"
-          echo "TAG_MODE=$(jq -r '.tagMode' release-selection.json)" >> "$GITHUB_ENV"
-          echo "RC_NUMBER=$(jq -r '.rcNumber' release-selection.json)" >> "$GITHUB_ENV"
-
-      - name: Resolve and freeze the selected source
-        run: |
-          git branch --force main "$MAIN_SHA"
-          sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
-          git merge-base --is-ancestor "$sha" "$MAIN_SHA" || { echo 'Select a commit from main history.'; exit 1; }
-          echo "SOURCE_SHA=$sha" >> "$GITHUB_ENV"
-          git show "$sha:package.json" > source-package.json
-
-      - name: Require the selected source to have passed DEV
+      - name: Require a successful DEV run for that source
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
-            -f head_sha="$SOURCE_SHA" -f event=push -f status=success -f per_page=1 \
-            --jq '.total_count > 0' | grep -qx true
+          SOURCE_SHA: ${{ steps.selection.outputs.sha }}
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'build.yml', head_sha: process.env.SOURCE_SHA,
+              event: 'push', status: 'success', per_page: 1
+            });
+            if (!data.total_count) throw new Error('The selected commit has not passed DEV.');
 
-      - name: Select the tag and describe its actual source
-        run: |
-          tag="v$RELEASE_VERSION"
-          if [[ "$TAG_MODE" == 'rc' ]]; then
-            [[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'RC number must be a positive integer.'; exit 1; }
-            tag="$tag-rc.$RC_NUMBER"
-          fi
-          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
-          package_version=$(jq -er '.version' source-package.json)
-          printf 'Release version: %s\nSource commit: %s\nSource package version: %s\nVersion metadata commit: %s\n\nThe selected source commit defines the included code. The version PR changelog may contain newer changes excluded from this source.\n' \
-            "$tag" "$SOURCE_SHA" "$package_version" "$METADATA_SHA" > release-notes.md
-
-      - name: Create the tag or reuse its exact commit
-        run: |
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" > tag.json 2> tag-error.log; then
-            actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')
-            [[ "$actual_sha" == "$SOURCE_SHA" ]] || { echo "::error::$RELEASE_TAG already points to another commit. Prepare a new version or choose another RC number."; exit 1; }
-          elif grep -q 'HTTP 404' tag-error.log; then
-            if [[ "$TAG_MODE" == 'stable' ]]; then
-              gh api "repos/$GITHUB_REPOSITORY/issues/$RELEASE_PR/labels" \
-                --jq 'any(.[]; .name == "autorelease: pending")' | grep -qx true
-            fi
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$RELEASE_TAG" -f sha="$SOURCE_SHA"
-          else
-            cat tag-error.log >&2
-            exit 1
-          fi
-
-      - name: Publish or reuse the release without changing existing notes
-        run: |
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > release.json 2> release-error.log; then
-            jq -e --arg mode "$TAG_MODE" '.draft == false and .prerelease == ($mode == "rc")' release.json
-          elif grep -q 'HTTP 404' release-error.log; then
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$RELEASE_TAG" \
-              --notes-file release-notes.md --latest=false --prerelease="$([[ "$TAG_MODE" == 'rc' ]] && echo true || echo false)"
-          else
-            cat release-error.log >&2
-            exit 1
-          fi
-
-      - name: Advance Release Please lifecycle after stable publication
-        if: env.TAG_MODE == 'stable'
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/issues/$RELEASE_PR/labels" \
-            --jq '{labels: ([.[].name | select(. != "autorelease: pending")] + ["autorelease: tagged"] | unique)}' > published-labels.json
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/issues/$RELEASE_PR/labels" --input published-labels.json
-
-      - name: Record the immutable release selection
-        run: |
-          echo "Created or reused $RELEASE_TAG at $SOURCE_SHA." >> "$GITHUB_STEP_SUMMARY"
-          echo 'Run Deploy TEST with this release-tag. DEV continues following main.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish or reuse the immutable tag and release
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          RELEASE_TAG: ${{ steps.selection.outputs.tag }}
+          SOURCE_SHA: ${{ steps.selection.outputs.sha }}
+          SOURCE_VERSION: ${{ steps.selection.outputs.source-version }}
+          RELEASE_PR: ${{ steps.selection.outputs.pr }}
+          TAG_MODE: ${{ steps.selection.outputs.mode }}
+        with:
+          github-token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const repo = context.repo;
+            const tag = process.env.RELEASE_TAG;
+            const sha = process.env.SOURCE_SHA;
+            const prerelease = process.env.TAG_MODE === 'rc';
+            const issue_number = Number(process.env.RELEASE_PR);
+            async function find(request) {
+              try { return (await request()).data; }
+              catch (error) { if (error.status !== 404) throw error; return null; }
+            }
+            const ref = await find(() => github.rest.git.getRef({ ...repo, ref: `tags/${tag}` }));
+            if (ref) {
+              const { data } = await github.rest.repos.getCommit({ ...repo, ref: tag });
+              if (data.sha !== sha) throw new Error(`${tag} points to another commit. Tags are never moved.`);
+            } else {
+              if (!prerelease) {
+                const { data } = await github.rest.issues.listLabelsOnIssue({ ...repo, issue_number });
+                if (!data.some(l => l.name === 'autorelease: pending')) throw new Error('Stable release is not pending.');
+              }
+              await github.rest.git.createRef({ ...repo, ref: `refs/tags/${tag}`, sha });
+            }
+            const existing = await find(() => github.rest.repos.getReleaseByTag({ ...repo, tag }));
+            if (existing) {
+              if (existing.draft || existing.prerelease !== prerelease) throw new Error('Existing release has a different publication mode.');
+            } else {
+              const body = `Source commit: ${sha}\nSource package version: ${process.env.SOURCE_VERSION}\nVersion metadata commit: ${process.env.RELEASE_COMMIT}\n\nThe selected source defines the included code. The version PR may describe newer changes.`;
+              await github.rest.repos.createRelease({ ...repo, tag_name: tag, name: tag, body, prerelease, make_latest: 'false' });
+            }
+            if (!prerelease) {
+              const { data } = await github.rest.issues.listLabelsOnIssue({ ...repo, issue_number });
+              const labels = new Set(data.map(l => l.name).filter(name => name !== 'autorelease: pending'));
+              labels.add('autorelease: tagged');
+              await github.rest.issues.setLabels({ ...repo, issue_number, labels: [...labels] });
+            }
+            await core.summary.addRaw(`Published ${tag} at ${sha}. Run Deploy TEST with this tag.`).write();
