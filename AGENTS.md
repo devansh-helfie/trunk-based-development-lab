@@ -46,8 +46,8 @@ the latest relevant run or attempt: a newer failure must block promotion even
 when an older successful run or QA artifact exists. Unrelated source commits
 do not change the eligibility of the selected release.
 
-Historical-source exception: a main-history commit with no normal DEV run may
-qualify through isolated DEV container validation on a hosted runner. Record
-the result as an Actions-created commit status on that exact SHA. Never use this
-path to bypass a failed or unfinished normal DEV run, and never overwrite the
-shared DEV environment with historical source.
+Historical-source POC exception: a main-history commit with no normal DEV run
+may be published and deployed to TEST without DEV validation. Log the exception;
+do not build an isolated DEV container or write a verification status. Never use
+this path to bypass a failed or unfinished normal DEV run. TEST application tests,
+deployment and QA remain required, and shared DEV continues to track main.
