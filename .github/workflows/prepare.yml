@@ -205,7 +205,7 @@ jobs:
           if [[ -n "$release" ]]; then
             jq -e --argjson prerelease "$PRERELEASE" '.draft == false and .prerelease == $prerelease' <<< "$release"
           else
-            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --latest=false --prerelease="$PRERELEASE" \
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --prerelease="$PRERELEASE" \
               --notes "Source commit: $SOURCE_SHA
           Source package version: $SOURCE_VERSION
           Version metadata commit: $RELEASE_COMMIT
