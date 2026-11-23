@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   prepare:
-    name: Prepare or resume the release
+    name: Create or update the release PR
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -42,8 +42,6 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-    outputs:
-      pending-sha: ${{ steps.selection.outputs.pending-sha }}
     env:
       GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
@@ -68,9 +66,9 @@ jobs:
             git merge-base --is-ancestor "$sha" "$GITHUB_SHA"
             tags=$(git tag --points-at "$sha")
             if [[ -n "$tags" ]]; then
-              printf 'Commit %s already has tag(s):\n%s\nNo new release or tag was created.\n' "$sha" "$tags" | tee -a "$GITHUB_STEP_SUMMARY"
-              echo 'skip=true' >> "$GITHUB_OUTPUT"
-              exit 0
+              printf 'Commit %s already has tag(s):\n%s\nRelease PR was not created. Use an untagged source or deploy an existing tag.\n' "$sha" "$tags" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo '::error::Release PR was not created: the selected source already has tags.'
+              exit 1
             fi
           fi
           if [[ "$TAG_MODE" == rc ]]; then
@@ -80,7 +78,6 @@ jobs:
 
       - name: Create or update the version PR
         id: release
-        if: steps.source.outputs.skip != 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -89,31 +86,21 @@ jobs:
           manifest-file: .release-please-manifest.json
           skip-github-release: true
 
-      - name: Select the new or pending release PR
+      - name: Require a release PR
         id: selection
-        if: steps.source.outputs.skip != 'true'
         env:
           RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
-          if [[ -n "$RELEASE_PR" ]]; then
-            pr=$(jq -er '.number' <<< "$RELEASE_PR")
-          else
-            version=$(jq -er '.["."]' .release-please-manifest.json)
-            pr=$(gh pr list --state merged --base main --label 'autorelease: pending' --json number,title,headRefName \
-              | jq -r --arg title "chore: PLT-1652 release $version" \
-                '.[] | select(.title == $title and (.headRefName | startswith("release-please--"))) | .number')
-            if [[ -z "$pr" ]]; then
-              echo 'Release Please found no new releasable changes and no pending release. No tag was created.' | tee -a "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            [[ "$pr" =~ ^[0-9]+$ ]] || { echo 'No unique pending release found. There may be no releasable changes.'; exit 1; }
-            pending_sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid')
-            echo "pending-sha=$pending_sha" >> "$GITHUB_OUTPUT"
+          if [[ -z "$RELEASE_PR" ]]; then
+            message='Release Please returned no release PR. Check for releasable commits or an unpublished merged release PR.'
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$message"
+            exit 1
           fi
+          pr=$(jq -er '.number' <<< "$RELEASE_PR")
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
 
       - name: Save release choices for automatic publication
-        if: steps.selection.outputs.pr != ''
         env:
           RELEASE_PR: ${{ steps.selection.outputs.pr }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
@@ -123,21 +110,17 @@ jobs:
           jq -n --arg sha "$SOURCE_SHA" --arg mode "$TAG_MODE" --arg rc "$RC_NUMBER" \
             '{releaseSelection: true, sourceSha: $sha, tagMode: $mode, rcNumber: $rc}' \
             | gh pr comment "$RELEASE_PR" --body-file -
-          echo "Release PR #$RELEASE_PR: merge to publish after DEV passes, or resume if already merged." >> "$GITHUB_STEP_SUMMARY"
+          echo "Release PR: [$RELEASE_PR]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$RELEASE_PR). Merge to publish after DEV passes." >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     name: Publish after DEV passes
     needs: prepare
     if: >-
-      always() && (
-        (github.event_name == 'workflow_dispatch' && needs.prepare.result == 'success' &&
-         needs.prepare.outputs.pending-sha != '') ||
-        (github.event_name == 'workflow_run' &&
-         github.event.workflow_run.event == 'push' &&
-         github.event.workflow_run.conclusion == 'success' &&
-         github.event.workflow_run.head_repository.full_name == github.repository &&
-         startsWith(github.event.workflow_run.head_commit.message, 'chore: PLT-1652 release '))
-      )
+      always() && github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_commit.message, 'chore: PLT-1652 release ')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -147,7 +130,7 @@ jobs:
       actions: read
     env:
       GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-      RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha || needs.prepare.outputs.pending-sha }}
+      RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

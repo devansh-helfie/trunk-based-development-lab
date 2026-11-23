@@ -348,22 +348,21 @@ All manual workflows execute their trusted configuration from branch main.
    succeeds, the same workflow creates the immutable tag and GitHub Release.
    Failed DEV prevents publication. The selected source must also have passed
    DEV. Stable publication advances the PR lifecycle; RC leaves it pending.
-   If a version PR is already merged and still pending publication, the same
-   Prepare Release button resumes it with the chosen settings and DEV checks.
-   No extra operation or PR merge is needed for that recovery.
+   Manual preparation does not resume a previously merged release. If publication
+   fails, rerun its failed automatic publication job with the saved choices.
 4. **Deploy TEST** (`release.yml`) has exactly one input, `release-tag`. It only
    resolves an existing version tag, requires main ancestry and successful DEV,
    rebuilds/deploys that frozen source and runs live QA. It never creates tags,
    changes release versions or edits lifecycle labels. Manually created Git tags
    can also be deployed if they pass these checks; a GitHub Release is optional.
 
-When an explicit `source-ref` resolves to an already tagged commit, preparation
-logs the full SHA and its existing tags and exits successfully before calling
-Release Please. Untagged sources continue through the normal Release Please
-flow. Blank `source-ref` keeps the normal preparation/resume behavior. If Release
-Please has no new version PR and no pending release, the run reports that there
-is nothing to release and succeeds without creating a tag. No version is invented
-for this case.
+Manual **Prepare Release** succeeds only when Release Please returns a version
+PR and the workflow saves its release choices. Its summary links that PR. If no
+PR is returned, the job fails with an Actions error and summary message instead
+of silently resuming an older merged release or succeeding without a PR. Possible
+causes include no releasable changes or an unpublished merged release PR. An
+explicit `source-ref` that already has tags also fails, listing the SHA and tags.
+No version is invented and no existing tag is moved.
 
 For this POC, a retrospective source on main with no main-push DEV record skips
 DEV validation. The workflow logs this exception instead of building a temporary

@@ -51,3 +51,8 @@ may be published and deployed to TEST without DEV validation. Log the exception;
 do not build an isolated DEV container or write a verification status. Never use
 this path to bypass a failed or unfinished normal DEV run. TEST application tests,
 deployment and QA remain required, and shared DEV continues to track main.
+
+Manual Prepare Release must return a release PR and save its choices to succeed.
+No returned PR or an explicitly selected already-tagged source must fail with a
+clear Actions error and summary. Do not silently resume an older merged release.
+Automatic post-DEV publication remains separate from this manual PR requirement.
