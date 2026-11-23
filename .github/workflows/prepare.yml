@@ -1,4 +1,4 @@
-name: Prepare Release
+name: Release - Prepare and Publish
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ on:
         type: string
         default: '1'
   workflow_run:
-    workflows: [Build]
+    workflows: [DEV - Build and Deploy]
     types: [completed]
     branches: [main]
 
@@ -224,4 +224,4 @@ jobs:
           gh pr edit "$RELEASE_PR" --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
 
       - name: Show the tag to deploy
-        run: echo "Published $RELEASE_TAG at $SOURCE_SHA. Run Deploy TEST with this tag." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Published $RELEASE_TAG at $SOURCE_SHA. Run TEST - Deploy and QA with this tag." >> "$GITHUB_STEP_SUMMARY"
