@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.3.0...v2.4.0) (2026-11-23)
+
+
+### Features
+
+* PLT-1672 allow stable releases to become Latest ([#33](https://github.com/devansh-helfie/trunk-based-development-lab/issues/33)) ([72e1e52](https://github.com/devansh-helfie/trunk-based-development-lab/commit/72e1e52ad0d127cb8db259008d2300f9655ca840))
+
 ## [2.3.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.2.0...v2.3.0) (2026-11-21)
 
 
