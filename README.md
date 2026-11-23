@@ -357,6 +357,15 @@ All manual workflows execute their trusted configuration from branch main.
    changes release versions or edits lifecycle labels. Manually created Git tags
    can also be deployed if they pass these checks; a GitHub Release is optional.
 
+When an explicit `source-ref` resolves to an already tagged commit, preparation
+logs the full SHA and its existing tags and exits successfully before calling
+Release Please. Untagged sources continue through the normal Release Please
+flow. Blank `source-ref` keeps the normal preparation/resume behavior. If Release
+Please has no new version PR and no pending release, the run reports that there
+is nothing to release and succeeds without creating a tag. No version is invented
+for this case. Historical sources still require the latest successful DEV run;
+this change does not turn an unverified commit into an approved deployment.
+
 Release Please owns version calculation and the metadata PR. Publication is
 custom because native Release Please publishes its version PR merge commit,
 whereas this POC explicitly allows any previously DEV-verified main source.

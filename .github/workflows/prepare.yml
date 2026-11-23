@@ -66,6 +66,12 @@ jobs:
             git branch --force main "$GITHUB_SHA"
             sha=$(git rev-parse --verify --end-of-options "${ref}^{commit}")
             git merge-base --is-ancestor "$sha" "$GITHUB_SHA"
+            tags=$(git tag --points-at "$sha")
+            if [[ -n "$tags" ]]; then
+              printf 'Commit %s already has tag(s):\n%s\nNo new release or tag was created.\n' "$sha" "$tags" | tee -a "$GITHUB_STEP_SUMMARY"
+              echo 'skip=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
           if [[ "$TAG_MODE" == rc ]]; then
             [[ "$RC_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'Enter a positive RC number.'; exit 1; }
@@ -74,6 +80,7 @@ jobs:
 
       - name: Create or update the version PR
         id: release
+        if: steps.source.outputs.skip != 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -84,6 +91,7 @@ jobs:
 
       - name: Select the new or pending release PR
         id: selection
+        if: steps.source.outputs.skip != 'true'
         env:
           RELEASE_PR: ${{ steps.release.outputs.pr }}
         run: |
@@ -94,6 +102,10 @@ jobs:
             pr=$(gh pr list --state merged --base main --label 'autorelease: pending' --json number,title,headRefName \
               | jq -r --arg title "chore: PLT-1652 release $version" \
                 '.[] | select(.title == $title and (.headRefName | startswith("release-please--"))) | .number')
+            if [[ -z "$pr" ]]; then
+              echo 'Release Please found no new releasable changes and no pending release. No tag was created.' | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             [[ "$pr" =~ ^[0-9]+$ ]] || { echo 'No unique pending release found. There may be no releasable changes.'; exit 1; }
             pending_sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid')
             echo "pending-sha=$pending_sha" >> "$GITHUB_OUTPUT"
@@ -101,6 +113,7 @@ jobs:
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
 
       - name: Save release choices for automatic publication
+        if: steps.selection.outputs.pr != ''
         env:
           RELEASE_PR: ${{ steps.selection.outputs.pr }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
