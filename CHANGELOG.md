@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/3.0.0...3.1.0) (2026-11-23)
+
+
+### Features
+
+* PLT-1672 require a release PR for successful preparation ([#52](https://github.com/devansh-helfie/trunk-based-development-lab/issues/52)) ([977014d](https://github.com/devansh-helfie/trunk-based-development-lab/commit/977014dbfc6ba785fbcb7368f81831fd358bf49c))
+* PLT-1672 reuse existing stable tags across prefix transition ([#38](https://github.com/devansh-helfie/trunk-based-development-lab/issues/38)) ([42138b4](https://github.com/devansh-helfie/trunk-based-development-lab/commit/42138b4acc1bc0c38c89e643a6bf2ac3d4db1635))
+* PLT-1672 simplify retrospective releases without DEV history ([#48](https://github.com/devansh-helfie/trunk-based-development-lab/issues/48)) ([59cfdc0](https://github.com/devansh-helfie/trunk-based-development-lab/commit/59cfdc04e262bd7878a671f6705b0bc1e3bf854b))
+* PLT-1672 skip already-tagged sources and handle no release changes ([#45](https://github.com/devansh-helfie/trunk-based-development-lab/issues/45)) ([3cfdf6c](https://github.com/devansh-helfie/trunk-based-development-lab/commit/3cfdf6c33c295cc509ff7f206d2a78c26529a273))
+* PLT-1672 validate historical sources before retrospective releases ([#47](https://github.com/devansh-helfie/trunk-based-development-lab/issues/47)) ([da34884](https://github.com/devansh-helfie/trunk-based-development-lab/commit/da348847aeacd97887a6179af3e701a0670d2a76))
+* **version:** Update version from 2.0.0 to 3.0.0 ([#54](https://github.com/devansh-helfie/trunk-based-development-lab/issues/54)) ([3c03e16](https://github.com/devansh-helfie/trunk-based-development-lab/commit/3c03e1626f3d1f4e63e99df2fd328f128a7f3d55))
+* **vscode:** Add .vscode to .dockerignore ([#50](https://github.com/devansh-helfie/trunk-based-development-lab/issues/50)) ([8c6f4ca](https://github.com/devansh-helfie/trunk-based-development-lab/commit/8c6f4ca82ecee22573ba4020f8dbf7d9552cc95d))
+* **vscode:** Remove .vscode from .gitignore ([#43](https://github.com/devansh-helfie/trunk-based-development-lab/issues/43)) ([3831a0f](https://github.com/devansh-helfie/trunk-based-development-lab/commit/3831a0f0b4d0e7018b076cdbd73013463c97004f))
+
 ## [2.0.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/1.0.0...2.0.0) (2026-11-23)
 
 
