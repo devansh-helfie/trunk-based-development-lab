@@ -380,6 +380,12 @@ No PROD container starts before approval. The local URL is
 http://prod.localhost:3003. Deployment verifies environment, source SHA, digest
 and stable release identity. A stable tag alone does not authorize deployment.
 
+Promotion checks the latest DEV run for the selected source and the most recently
+updated TEST run/attempt for the selected tag. A failure, cancellation or unfinished
+run blocks promotion even when older success evidence exists. Unrelated sources
+and tags do not affect the selected release. TEST run names include their tag;
+rerun Deploy TEST after this change before promoting to PROD.
+
 ### Setup and limits
 
 - RELEASE_TOKEN is used for preparation/publication when present, with
@@ -397,11 +403,6 @@ and stable release identity. A stable tag alone does not authorize deployment.
   uses the GitHub PROD environment gate.
 
 ## Future promotion milestones
-
-Next iteration: evaluate the latest relevant lower-environment run or attempt.
-A newer DEV failure must block TEST for that source, and a newer TEST deployment
-or QA failure must block PROD for that tag/source, even if older success evidence
-exists. Current gates check successful DEV history and available QA evidence.
 
 Rollback UI, ZIP deployment and same-digest artifact reuse remain future work.
 Earlier designs are retained in `.backups/`.
