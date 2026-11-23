@@ -363,14 +363,14 @@ Release Please. Untagged sources continue through the normal Release Please
 flow. Blank `source-ref` keeps the normal preparation/resume behavior. If Release
 Please has no new version PR and no pending release, the run reports that there
 is nothing to release and succeeds without creating a tag. No version is invented
-for this case. Historical sources still require DEV verification. When the selected SHA has no
-main-push DEV record, publication tests that source and builds/runs a temporary
-DEV container on a GitHub-hosted runner. This does not replace the shared DEV
-environment. A commit status named `DEV - Historical validation` records pending,
-success or failure against the exact source SHA and links the validation run.
-TEST accepts its latest successful Actions-created status only when no normal
-DEV record exists. An existing failed or unfinished normal DEV run still blocks
-promotion; historical validation cannot bypass it.
+for this case.
+
+For this POC, a retrospective source on main with no main-push DEV record skips
+DEV validation. The workflow logs this exception instead of building a temporary
+DEV container or writing a verification status. An existing DEV run must still
+have completed successfully; a failed or unfinished run blocks publication and
+TEST. TEST still builds the selected source, runs application tests, deploys it
+and requires QA. PROD still requires successful TEST deployment and QA.
 
 Release Please owns version calculation and the metadata PR. Publication is
 custom because native Release Please publishes its version PR merge commit,
