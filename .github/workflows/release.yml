@@ -1,4 +1,4 @@
-name: Deploy TEST
+name: TEST - Deploy and QA
 run-name: TEST ${{ inputs.release-tag }}
 
 on:

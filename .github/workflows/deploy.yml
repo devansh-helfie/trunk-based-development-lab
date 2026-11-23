@@ -1,4 +1,4 @@
-name: Deploy
+name: Shared - Container Deployment
 
 on:
   workflow_call:

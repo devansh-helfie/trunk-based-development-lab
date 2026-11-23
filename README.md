@@ -1,11 +1,29 @@
 # Trunk-Based Development Lab
 
+## GitHub Actions workflow names
+
+- **PR - Checks**: automatic checks for pull requests (`ci.yml`).
+- **DEV - Build and Deploy**: automatic main deployment; also provides the shared
+  build jobs used by TEST and PROD (`build.yml`).
+- **Release - Prepare and Publish**: manually prepare a release PR, then publish
+  its selected tag automatically after the merged release passes DEV (`prepare.yml`).
+- **TEST - Deploy and QA**: manually deploy an existing tag and run QA (`release.yml`).
+- **PROD - Promote with Approval**: manually promote a TEST-verified tag, with
+  approval before deployment (`prod.yml`).
+- **Shared - Container Deployment**: reusable deployment helper (`deploy.yml`).
+  It is called by other workflows and has no standalone runs or manual button.
+
+Only the release, TEST and PROD workflows need manual runs for the demo.
+The displayed TEST run titles stay `TEST <tag>` so the existing PROD gate can
+identify the latest relevant TEST result.
+
+
 ## Fresh demo baseline
 
 The new demo starts at package/manifest version `0.1.0`, without published tags
 or GitHub Releases. Release Please ignores commits before the configured
 bootstrap SHA. Merge this baseline PR first, then merge a `feat:` PR and run
-Prepare Release to demonstrate the next minor version. Tags have no `v` prefix.
+Release - Prepare and Publish to demonstrate the next minor version. Tags have no `v` prefix.
 
 Existing TEST/PROD containers and their data are preserved until explicitly
 redeployed. Their old release identities can remain visible after history is
@@ -338,7 +356,7 @@ DEV automatically builds and deploys each main merge. TEST independently selects
 an existing tag. Creating or deploying a historical tag does not reset main/DEV.
 All manual workflows execute their trusted configuration from branch main.
 
-1. Run **Prepare Release** (`prepare.yml`) once. Select rc/stable and an RC
+1. Run **Release - Prepare and Publish** (`prepare.yml`) once. Select rc/stable and an RC
    sequence when applicable. Release Please calculates the next version and
    creates the version/changelog PR. There is no separate create-tag operation.
 2. The workflow saves the release selection as a JSON comment on that PR.
@@ -350,13 +368,13 @@ All manual workflows execute their trusted configuration from branch main.
    DEV. Stable publication advances the PR lifecycle; RC leaves it pending.
    Manual preparation does not resume a previously merged release. If publication
    fails, rerun its failed automatic publication job with the saved choices.
-4. **Deploy TEST** (`release.yml`) has exactly one input, `release-tag`. It only
+4. **TEST - Deploy and QA** (`release.yml`) has exactly one input, `release-tag`. It only
    resolves an existing version tag, requires main ancestry and successful DEV,
    rebuilds/deploys that frozen source and runs live QA. It never creates tags,
    changes release versions or edits lifecycle labels. Manually created Git tags
    can also be deployed if they pass these checks; a GitHub Release is optional.
 
-Manual **Prepare Release** succeeds only when Release Please returns a version
+Manual **Release - Prepare and Publish** succeeds only when Release Please returns a version
 PR and the workflow saves its release choices. Its summary links that PR. If no
 PR is returned, the job fails with an Actions error and summary message instead
 of silently resuming an older merged release or succeeding without a PR. Possible
@@ -392,16 +410,16 @@ Existing tags on a different SHA fail and are never moved. Repeating a successfu
 publication on the same SHA reuses it. A failed QA leaves the selected source in
 TEST and does not mark it approved for PROD. Stable release publication alone
 is not QA approval. Tags already published by the earlier native flow remain
-usable. Rollback UI is deferred; Deploy TEST can explicitly retest an older
+usable. Rollback UI is deferred; TEST - Deploy and QA can explicitly retest an older
 existing tag.
 
 ### PROD promotion
 
-After merging this workflow change, run Deploy TEST again so successful QA saves
+After merging this workflow change, run TEST - Deploy and QA again so successful QA saves
 its verification artifact (retained for 14 days). Earlier runs have no artifact.
-Then run **Promote to PROD** (`prod.yml`) from main with only `tested-tag`.
+Then run **PROD - Promote with Approval** (`prod.yml`) from main with only `tested-tag`.
 
-The workflow requires a successful Deploy TEST run whose evidence matches the
+The workflow requires a successful TEST - Deploy and QA run whose evidence matches the
 exact tag and commit. It finds the merged Release Please version PR, converts
 `2.4.0-rc.1` to `2.4.0` on that same commit, or reuses a stable tag tested directly.
 An existing stable tag on another commit is rejected. Stable publication updates
@@ -418,7 +436,7 @@ Promotion checks the latest DEV run for the selected source and the most recentl
 updated TEST run/attempt for the selected tag. A failure, cancellation or unfinished
 run blocks promotion even when older success evidence exists. Unrelated sources
 and tags do not affect the selected release. TEST run names include their tag;
-rerun Deploy TEST after this change before promoting to PROD.
+rerun TEST - Deploy and QA after this change before promoting to PROD.
 
 ### Setup and limits
 
