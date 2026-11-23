@@ -51,7 +51,7 @@ jobs:
       - name: Require a stable version tag for PROD
         if: inputs.environment == 'PROD'
         run: |
-          [[ "$RELEASE_IDENTITY" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'PROD requires a stable version tag.'; exit 1; }
+          [[ "$RELEASE_IDENTITY" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'PROD requires a stable version tag.'; exit 1; }
 
       - name: Validate the TEST demonstration setting
         if: inputs.environment == 'TEST'

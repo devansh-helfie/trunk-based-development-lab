@@ -67,7 +67,7 @@ async function refresh() {
   const [state, metadata] = await Promise.all([request('/api/admin/flags'), request('/version')]);
   snapshot = state;
   $('#environment').textContent = state.environment;
-  $('#version').textContent = `v${metadata.version}`;
+  $('#version').textContent = metadata.version;
   const recorded = (value) => value && value !== 'unknown' ? value : 'Not recorded';
   $('#release-identity').textContent = metadata.releaseIdentity === 'unreleased'
     ? 'Unreleased' : recorded(metadata.releaseIdentity);
