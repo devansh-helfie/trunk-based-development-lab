@@ -38,7 +38,7 @@ overengineer. Use standard tools and short, named Bash steps for workflows when
 they suffice. Avoid custom JavaScript, helper files, abstractions and defensive
 branches without a concrete need. Keep necessary correctness checks.
 
-## Next iteration: promotion eligibility
+## Promotion eligibility
 
 TEST must require a successful DEV deployment for its selected source. PROD must
 require successful TEST deployment and QA for its selected tag and source. Use

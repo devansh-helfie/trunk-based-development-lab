@@ -58,12 +58,13 @@ jobs:
 
       - name: Require successful TEST QA for this exact tag and commit
         run: |
-          run=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f name="test-qa-$TESTED_TAG" \
-            --jq '.artifacts | map(select(.expired == false)) | first | .workflow_run.id // empty')
-          [[ "$run" =~ ^[0-9]+$ ]] || { echo 'No QA evidence found. Run Deploy TEST with this tag first.'; exit 1; }
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" | jq -e \
-            '.path == ".github/workflows/release.yml" and .event == "workflow_dispatch" and
-            .head_branch == "main" and .status == "completed" and .conclusion == "success"'
+          run=$(gh api --method GET --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs" \
+            -f event=workflow_dispatch -f branch=main -f per_page=100 \
+            | jq -er --arg tag "$TESTED_TAG" '[.[].workflow_runs[] |
+              select((.display_title | sub("^TEST "; "") | gsub("^\\s+|\\s+$"; "")) == $tag)] |
+              max_by(.updated_at) |
+              if .status == "completed" and .conclusion == "success" then .id
+              else error("The latest TEST run for this tag must pass before promotion") end')
           gh run download "$run" --name "test-qa-$TESTED_TAG" --dir test-evidence
           jq -e --arg tag "$TESTED_TAG" --arg sha "$SOURCE_SHA" --arg run "$run" \
             '.environment == "TEST" and .releaseIdentity == $tag and .commitSha == $sha and .qaRunId == $run' \
