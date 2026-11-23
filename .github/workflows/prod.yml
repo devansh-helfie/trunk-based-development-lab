@@ -100,7 +100,7 @@ jobs:
           if [[ -n "$release" ]]; then
             jq -e '.draft == false and .prerelease == false' <<< "$release"
           else
-            gh release create "$STABLE_TAG" --verify-tag --title "$STABLE_TAG" --latest=false \
+            gh release create "$STABLE_TAG" --verify-tag --title "$STABLE_TAG" \
               --notes "Promoted from $TESTED_TAG at $SOURCE_SHA. TEST QA: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$QA_RUN"
           fi
           gh pr edit "$RELEASE_PR" --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
