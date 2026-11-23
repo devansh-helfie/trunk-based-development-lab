@@ -355,9 +355,11 @@ Release notes identify source SHA, source package version and metadata SHA;
 they do not copy the newer version PR's changelog as claims about older code.
 
 New release tags use no `v` prefix, for example `2.4.0-rc.1` and `2.4.0`.
-Existing `v` tags remain accepted without being renamed. Promoting a legacy RC
-creates an unprefixed stable tag on the tested commit. A stable tag tested directly
-is reused with its exact existing name. Package versions do not change for this
+Existing `v` tags remain accepted without being renamed. Stable publication first
+reuses the unprefixed stable tag, or the legacy prefixed stable tag if only that
+name exists. It creates an unprefixed tag only when neither name exists. Existing
+tags must match the tested source or publication fails. A stable tag tested
+directly is reused with its exact existing name. Package versions do not change for this
 format-only adjustment.
 
 Existing tags on a different SHA fail and are never moved. Repeating a successful
