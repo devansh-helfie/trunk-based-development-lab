@@ -1,5 +1,17 @@
 # Trunk-Based Development Lab
 
+## Fresh demo baseline
+
+The new demo starts at package/manifest version `0.1.0`, without published tags
+or GitHub Releases. Release Please ignores commits before the configured
+bootstrap SHA. Merge this baseline PR first, then merge a `feat:` PR and run
+Prepare Release to demonstrate the next minor version. Tags have no `v` prefix.
+
+Existing TEST/PROD containers and their data are preserved until explicitly
+redeployed. Their old release identities can remain visible after history is
+cleared. Resetting release history does not deploy or erase those environments.
+
+
 A personal release engineering lab with a minimal Express Order Quote API.
 Application development stays small so GitHub Actions, Release Please, tags,
 immutable artifacts and QA gates remain the focus.
