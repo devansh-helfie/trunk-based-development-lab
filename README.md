@@ -354,6 +354,12 @@ QA checks the package version from the selected source, not from current main.
 Release notes identify source SHA, source package version and metadata SHA;
 they do not copy the newer version PR's changelog as claims about older code.
 
+New release tags use no `v` prefix, for example `2.4.0-rc.1` and `2.4.0`.
+Existing `v` tags remain accepted without being renamed. Promoting a legacy RC
+creates an unprefixed stable tag on the tested commit. A stable tag tested directly
+is reused with its exact existing name. Package versions do not change for this
+format-only adjustment.
+
 Existing tags on a different SHA fail and are never moved. Repeating a successful
 publication on the same SHA reuses it. A failed QA leaves the selected source in
 TEST and does not mark it approved for PROD. Stable release publication alone
@@ -369,7 +375,7 @@ Then run **Promote to PROD** (`prod.yml`) from main with only `tested-tag`.
 
 The workflow requires a successful Deploy TEST run whose evidence matches the
 exact tag and commit. It finds the merged Release Please version PR, converts
-`v2.3.0-rc.1` to `v2.3.0` on that same commit, or reuses a stable tag tested directly.
+`2.4.0-rc.1` to `2.4.0` on that same commit, or reuses a stable tag tested directly.
 An existing stable tag on another commit is rejected. Stable publication updates
 the Release Please lifecycle and is recorded before deployment approval.
 

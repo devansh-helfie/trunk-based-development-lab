@@ -164,7 +164,7 @@ jobs:
           sha=$(jq -er --arg fallback "$RELEASE_COMMIT" '.sourceSha | if . == "" then $fallback else . end |
             select(test("^[a-f0-9]{40}$"))' <<< "$selection")
           mode=$(jq -er '.tagMode | select(. == "rc" or . == "stable")' <<< "$selection")
-          tag="v$RELEASE_VERSION"
+          tag="$RELEASE_VERSION"
           prerelease=false
           if [[ "$mode" == rc ]]; then
             rc=$(jq -er '.rcNumber | select(test("^[1-9][0-9]*$"))' <<< "$selection")
