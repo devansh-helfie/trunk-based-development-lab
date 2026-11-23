@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/0.3.0...0.4.0) (2026-11-23)
+
+
+### Features
+
+* PLT-1672 skip already-tagged sources and handle no release changes ([#45](https://github.com/devansh-helfie/trunk-based-development-lab/issues/45)) ([3cfdf6c](https://github.com/devansh-helfie/trunk-based-development-lab/commit/3cfdf6c33c295cc509ff7f206d2a78c26529a273))
+
 ## [0.3.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/0.2.0...0.3.0) (2026-11-23)
 
 
