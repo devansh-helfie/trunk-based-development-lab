@@ -31,7 +31,6 @@ jobs:
 
   publish:
     name: Build the demo image
-    needs: ci
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     permissions:
@@ -72,6 +71,8 @@ jobs:
           context: .
           platforms: linux/arm64
           push: true
+          cache-from: type=gha,scope=trunk-lab-arm64
+          cache-to: type=gha,mode=max,scope=trunk-lab-arm64
           tags: ghcr.io/devansh-helfie/trunk-based-development-lab:build-${{ inputs.environment || 'DEV' }}-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
             COMMIT_SHA=${{ steps.source.outputs.sha }}
@@ -90,7 +91,7 @@ jobs:
 
   deploy:
     name: Deploy ${{ inputs.environment || 'DEV' }}
-    needs: publish
+    needs: [ci, publish]
     permissions:
       contents: read
       packages: read
