@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.4.0...2.5.0) (2026-11-23)
+
+
+### Features
+
+* PLT-1672 remove prefix from newly generated release tags ([#36](https://github.com/devansh-helfie/trunk-based-development-lab/issues/36)) ([d8facc3](https://github.com/devansh-helfie/trunk-based-development-lab/commit/d8facc31519c42dfd532e7bf76dcbbeebc69ea33))
+
 ## [2.4.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/v2.3.0...v2.4.0) (2026-11-23)
 
 
