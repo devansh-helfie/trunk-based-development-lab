@@ -171,6 +171,11 @@ jobs:
             tag="$tag-rc.$rc"
             prerelease=true
           fi
+          # Reuse a legacy stable name instead of publishing the same version twice.
+          if [[ "$mode" == stable ]] && ! git show-ref --verify --quiet "refs/tags/$tag" &&
+            git show-ref --verify --quiet "refs/tags/v$tag"; then
+            tag="v$tag"
+          fi
           echo "SOURCE_SHA=$sha" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
           echo "PRERELEASE=$prerelease" >> "$GITHUB_ENV"

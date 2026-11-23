@@ -56,6 +56,10 @@ jobs:
           if [[ "$tag" == *-rc.* ]]; then
             stable=${tag%-rc.*}
             stable=${stable#v}
+            if ! git show-ref --verify --quiet "refs/tags/$stable" &&
+              git show-ref --verify --quiet "refs/tags/v$stable"; then
+              stable="v$stable"
+            fi
           fi
           echo "STABLE_TAG=$stable" >> "$GITHUB_ENV"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
