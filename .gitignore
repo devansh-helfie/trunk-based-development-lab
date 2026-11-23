@@ -14,3 +14,4 @@ _work/
 
 # Local snapshots of deferred POC designs.
 .backups/
+.vscode/
