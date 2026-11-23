@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/0.4.0...0.5.0) (2026-11-23)
+
+
+### Features
+
+* PLT-1672 simplify retrospective releases without DEV history ([#48](https://github.com/devansh-helfie/trunk-based-development-lab/issues/48)) ([59cfdc0](https://github.com/devansh-helfie/trunk-based-development-lab/commit/59cfdc04e262bd7878a671f6705b0bc1e3bf854b))
+* PLT-1672 validate historical sources before retrospective releases ([#47](https://github.com/devansh-helfie/trunk-based-development-lab/issues/47)) ([da34884](https://github.com/devansh-helfie/trunk-based-development-lab/commit/da348847aeacd97887a6179af3e701a0670d2a76))
+
 ## [0.4.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/0.3.0...0.4.0) (2026-11-23)
 
 
