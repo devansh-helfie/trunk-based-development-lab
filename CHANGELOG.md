@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/3.1.0...3.2.0) (2026-11-24)
+
+
+### Features
+
+* **env:** Add new environment variable A with value B ([#57](https://github.com/devansh-helfie/trunk-based-development-lab/issues/57)) ([43b6a35](https://github.com/devansh-helfie/trunk-based-development-lab/commit/43b6a35f3d8658997530411170bb1c957291221d))
+* PLT-1672 clarify workflow names and manual release steps ([#41](https://github.com/devansh-helfie/trunk-based-development-lab/issues/41)) ([ed41cfa](https://github.com/devansh-helfie/trunk-based-development-lab/commit/ed41cfa915748cece06314de73ef05f5e8b56e00))
+
 ## [3.1.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/3.0.0...3.1.0) (2026-11-23)
 
 
