@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/3.2.0...3.3.0) (2026-11-24)
+
+
+### Features
+
+* **env:** new config added ([#58](https://github.com/devansh-helfie/trunk-based-development-lab/issues/58)) ([7fea8d4](https://github.com/devansh-helfie/trunk-based-development-lab/commit/7fea8d4c362319b36e7fa8f2b0278c88d8965417))
+
 ## [3.2.0](https://github.com/devansh-helfie/trunk-based-development-lab/compare/3.1.0...3.2.0) (2026-11-24)
 
 
